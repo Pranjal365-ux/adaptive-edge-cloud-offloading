@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+
+# Local experiment outputs (sample_results is a curated synthetic example).
+results/
+quick_results/
+live_results/
+live_probe.csv
+
+# Terraform state and deployment artifacts are private.
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.*
+terraform/*.tfplan
+terraform/tfplan
+terraform/function.zip
+terraform/crash.log
+terraform/crash.*.log
