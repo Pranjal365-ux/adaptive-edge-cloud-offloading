@@ -1,178 +1,260 @@
-"""Run paired edge/Azure Function experiments with four offloading policies.
+"""Measured four-policy experiment. Freeze calibration before final evaluation.
 
-This is a small live benchmark, separate from the discrete-event simulation.
-Keep the function key in AZURE_FUNCTION_KEY, never in source or results.
+CPU tasks use processes; digest references are prepared before measured runs.
+HTTPS sizes count JSON bodies only, not TCP/TLS/IP bytes or available bandwidth.
 """
 import argparse
 import csv
-import importlib.util
+import hashlib
 import json
+import math
 import os
+import platform
 import random
 import statistics
-import sys
 import time
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
+import psutil
+from azure_function.workload import compute
 
-ROOT = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("workload", ROOT / "azure_function" / "workload.py")
-workload = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(workload)
+POLICIES = ('edge', 'cloud', 'fixed', 'adaptive')
+ITERATIONS = (100_000, 300_000, 800_000, 1_600_000)
+DEV_ITERATIONS = (80_000, 250_000, 700_000, 1_400_000)
+SIZES = (1024, 16384, 65536)
 
-POLICIES = ("edge", "cloud", "fixed", "adaptive")
-ITERATIONS = (10_000, 40_000, 100_000, 200_000)
-SIZES = (1024, 16_384, 65_536)
-
+def utc():
+    return datetime.now(timezone.utc).isoformat()
 
 def cloud_compute(url, key, payload):
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
-                                 headers={"Content-Type": "application/json", "x-functions-key": key})
+    body = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=body, method='POST',
+        headers={'Content-Type': 'application/json', 'x-functions-key': key})
     with urllib.request.urlopen(req, timeout=90) as response:
-        return json.load(response)
-
+        raw = response.read()
+    result = json.loads(raw)
+    result['request_body_bytes'] = len(body)
+    result['response_body_bytes'] = len(raw)
+    return result
 
 def trace(seed, count, arrival_gap_ms):
     rng = random.Random(seed)
     arrival = 0.0
     jobs = []
     for index in range(count):
-        arrival += rng.expovariate(1 / arrival_gap_ms) / 1000 if index else 0
-        jobs.append({"task": index, "arrival_s": arrival, "iterations": rng.choice(ITERATIONS),
-                     "data": chr(97 + index % 26) * rng.choice(SIZES)})
+        if index:
+            arrival += rng.expovariate(1000 / arrival_gap_ms)
+        jobs.append({'task': index, 'arrival_s': arrival,
+            'iterations': rng.choice(ITERATIONS),
+            'data': chr(97 + index % 26) * rng.choice(SIZES)})
     return jobs
 
-
-def calibrate(url, key):
-    """Separate development calls fit a simple latency model; never use final-task outcomes."""
+def calibrate(url, key, output):
     observations = []
-    for iterations in ITERATIONS:
-        for size in (SIZES[0], SIZES[-1]):
-            payload = {"iterations": iterations, "data": "z" * size}
-            t0 = time.perf_counter()
-            local = workload.compute(payload)
-            edge_ms = (time.perf_counter() - t0) * 1000
-            t0 = time.perf_counter()
-            remote = cloud_compute(url, key, payload)
-            cloud_ms = (time.perf_counter() - t0) * 1000
-            if local["digest"] != remote.get("digest"):
-                raise RuntimeError("Calibration digest mismatch")
-            observations.append((iterations, size, edge_ms, cloud_ms, remote["compute_ms"]))
-    # Fit CPU slope from paired light/heavy tasks. Cloud overhead uses the median
-    # measured round-trip minus compute time; it includes network and service time.
-    edge_rate = statistics.median(x[2] / x[0] for x in observations)
-    cloud_rate = statistics.median(x[4] / x[0] for x in observations)
-    overhead = statistics.median(max(0, x[3] - x[4]) for x in observations)
-    threshold = min(ITERATIONS, key=lambda cut: statistics.mean(
-        overhead + cloud_rate * it if it > cut else edge_rate * it for it in ITERATIONS))
-    return {"edge_ms_per_iteration": edge_rate, "cloud_ms_per_iteration": cloud_rate,
-            "cloud_overhead_ms": overhead, "fixed_threshold_iterations": threshold,
-            "development_observations": len(observations)}
-
+    errors = []
+    # Development payloads and iteration values differ from evaluation.
+    for repetition in range(3):
+        for iterations in DEV_ITERATIONS:
+            for size in (SIZES[0], SIZES[-1]):
+                payload = {'iterations': iterations, 'data': 'CALIBRATION' * (size // 11)}
+                t0 = time.perf_counter()
+                local = compute(payload)
+                edge_ms = (time.perf_counter() - t0) * 1000
+                t0 = time.perf_counter()
+                for attempt in range(3):
+                    t0 = time.perf_counter()
+                    try:
+                        remote = cloud_compute(url, key, payload)
+                        roundtrip = (time.perf_counter() - t0) * 1000
+                        break
+                    except Exception as exc:
+                        errors.append({'utc': utc(), 'repetition': repetition, 'iterations': iterations, 'size': size, 'attempt': attempt, 'error': type(exc).__name__, 'elapsed_ms': (time.perf_counter()-t0)*1000})
+                        write_csv(output / 'calibration-errors.csv', errors)
+                        if attempt == 2:
+                            raise RuntimeError('Calibration unavailable after three attempts') from None
+                        time.sleep(2)
+                if local['digest'] != remote.get('digest'):
+                    raise RuntimeError('Calibration digest mismatch')
+                observations.append({'utc': utc(), 'repetition': repetition, 'iterations': iterations,
+                    'input_bytes': len(payload['data']), 'edge_ms': edge_ms,
+                    'cloud_roundtrip_ms': roundtrip, 'cloud_compute_ms': remote['compute_ms'],
+                    'digests_match': True})
+                write_csv(output / 'calibration.csv', observations)
+    edge_rate = statistics.median(x['edge_ms'] / x['iterations'] for x in observations)
+    cloud_rate = statistics.median(x['cloud_compute_ms'] / x['iterations'] for x in observations)
+    overhead = statistics.median(max(0, x['cloud_roundtrip_ms'] - x['cloud_compute_ms']) for x in observations)
+    # Include all-cloud and all-edge candidates. Objective uses development classes only.
+    candidates = (0,) + DEV_ITERATIONS
+    scores = {cut: statistics.mean(overhead + cloud_rate * it if it > cut else edge_rate * it
+        for it in DEV_ITERATIONS) for cut in candidates}
+    threshold = min(scores, key=lambda cut: (scores[cut], cut))
+    return {'edge_ms_per_iteration': edge_rate, 'cloud_ms_per_iteration': cloud_rate,
+        'cloud_overhead_ms': overhead, 'fixed_threshold_iterations': threshold,
+        'threshold_scores_ms': scores, 'development_observations': len(observations), 'calibration_failed_attempts': len(errors)}
 
 def execute(job, place, url, key, run_start):
     started = time.perf_counter()
-    payload = {"iterations": job["iterations"], "data": job["data"]}
-    if place == "edge":
-        result = workload.compute(payload)
-    else:
-        result = cloud_compute(url, key, payload)
+    result = {}
+    error = ''
+    try:
+        payload = {'iterations': job['iterations'], 'data': job['data']}
+        result = compute(payload) if place == 'edge' else cloud_compute(url, key, payload)
+        if result.get('digest') != job['expected_digest']:
+            error = 'DigestMismatch'
+    except Exception as exc:
+        # Exception type only: avoid leaking URLs, keys, or server response bodies.
+        error = type(exc).__name__
     finished = time.perf_counter()
-    # Validate against a short independent reference digest, outside measured time.
-    expected = workload.compute(payload)["digest"]
-    if result.get("digest") != expected:
-        raise RuntimeError(f"Digest mismatch for task {job['task']}")
-    return {"task": job["task"], "place": place, "iterations": job["iterations"],
-            "input_bytes": len(job["data"]), "arrival_s": job["arrival_s"],
-            "start_s": started - run_start, "finish_s": finished - run_start,
-            "service_ms": (finished - started) * 1000, "compute_ms": result["compute_ms"]}
+    return {'task': job['task'], 'place': place, 'iterations': job['iterations'],
+        'input_bytes': len(job['data'].encode()), 'arrival_s': job['arrival_s'],
+        'start_s': started - run_start, 'finish_s': finished - run_start,
+        'service_ms': (finished - started) * 1000, 'compute_ms': result.get('compute_ms', ''),
+        'request_body_bytes': result.get('request_body_bytes', 0),
+        'response_body_bytes': result.get('response_body_bytes', 0),
+        'worker_instance': result.get('worker_instance', ''),
+        'first_on_process': result.get('first_on_process', False),
+        'digest_match': not bool(error), 'error': error, 'utc_finished': utc()}
 
+def choose(policy, job, model, outstanding, edge_workers, cloud_workers):
+    if policy == 'fixed':
+        return 'cloud' if job['iterations'] > model['fixed_threshold_iterations'] else 'edge'
+    if policy != 'adaptive':
+        return policy
+    # Frozen rule: current unfinished client work, calibrated compute and HTTPS overhead.
+    # Full remaining service is approximated by full submitted task work (conservative).
+    edge = model['edge_ms_per_iteration'] * job['iterations']
+    cloud = model['cloud_overhead_ms'] + model['cloud_ms_per_iteration'] * job['iterations']
+    edge += sum(cost for f, cost in outstanding['edge'] if not f.done()) / edge_workers
+    cloud += sum(cost for f, cost in outstanding['cloud'] if not f.done()) / cloud_workers
+    return 'cloud' if cloud < edge else 'edge'
 
 def run_policy(jobs, policy, model, url, key, edge_workers, cloud_workers):
-    started = time.perf_counter()
-    records = []
-    outstanding = {"edge": [], "cloud": []}
+    outstanding = {'edge': [], 'cloud': []}
     all_futures = []
-    with ThreadPoolExecutor(max_workers=edge_workers) as edge_pool, ThreadPoolExecutor(max_workers=cloud_workers) as cloud_pool:
+    telemetry = []
+    with ProcessPoolExecutor(max_workers=edge_workers) as edge_pool, ThreadPoolExecutor(max_workers=cloud_workers) as cloud_pool:
+        # Exclude process spawn and digest-reference generation from the workload interval.
+        warm = [edge_pool.submit(compute, {'iterations': 1, 'data': ''}) for _ in range(edge_workers)]
+        for future in warm:
+            future.result()
+        psutil.cpu_percent(None)
+        started = time.perf_counter()
+        def sample():
+            telemetry.append({'elapsed_s': time.perf_counter() - started,
+                'system_cpu_percent': psutil.cpu_percent(None),
+                'system_memory_percent': psutil.virtual_memory().percent,
+                'available_memory_bytes': psutil.virtual_memory().available})
         for job in jobs:
-            delay = started + job["arrival_s"] - time.perf_counter()
-            if delay > 0:
-                time.sleep(delay)
+            while time.perf_counter() < started + job['arrival_s']:
+                sample()
+                time.sleep(min(.1, max(0, started + job['arrival_s'] - time.perf_counter())))
             for place in outstanding:
-                outstanding[place] = [f for f in outstanding[place] if not f.done()]
-            if policy == "fixed":
-                place = "cloud" if job["iterations"] > model["fixed_threshold_iterations"] else "edge"
-            elif policy == "adaptive":
-                edge_ms = model["edge_ms_per_iteration"] * job["iterations"] * (1 + len(outstanding["edge"]) / edge_workers)
-                cloud_ms = (model["cloud_overhead_ms"] + model["cloud_ms_per_iteration"] * job["iterations"]
-                            * (1 + len(outstanding["cloud"]) / cloud_workers))
-                place = "cloud" if cloud_ms < edge_ms else "edge"
-            else:
-                place = policy
-            pool = edge_pool if place == "edge" else cloud_pool
-            future = pool.submit(execute, job, place, url, key, started)
-            outstanding[place].append(future)
+                outstanding[place] = [(f, cost) for f, cost in outstanding[place] if not f.done()]
+            place = choose(policy, job, model, outstanding, edge_workers, cloud_workers)
+            pool = edge_pool if place == 'edge' else cloud_pool
+            future = pool.submit(execute, job, place, url, key if place == 'cloud' else '', started)
+            cost = model['edge_ms_per_iteration'] * job['iterations'] if place == 'edge' else model['cloud_overhead_ms'] + model['cloud_ms_per_iteration'] * job['iterations']
+            outstanding[place].append((future, cost))
             all_futures.append(future)
+            sample()
+        while not all(f.done() for f in all_futures):
+            sample()
+            time.sleep(.1)
         records = [f.result() for f in all_futures]
-    records.sort(key=lambda r: r["task"])
     for row in records:
-        row["completion_ms"] = (row["finish_s"] - row["arrival_s"]) * 1000
-    duration = max(r["finish_s"] for r in records)
-    latencies = sorted(r["completion_ms"] for r in records)
-    summary = {"policy": policy, "tasks": len(records), "mean_completion_ms": statistics.mean(latencies),
-               "p95_completion_ms": latencies[max(0, int(.95 * len(latencies) + .999999) - 1)],
-               "throughput_tasks_per_s": len(records) / duration,
-               "cloud_fraction": sum(r["place"] == "cloud" for r in records) / len(records),
-               "transferred_input_bytes": sum(r["input_bytes"] for r in records if r["place"] == "cloud")}
-    return summary, records
-
+        row['completion_ms'] = (row['finish_s'] - row['arrival_s']) * 1000
+    valid = [r for r in records if not r['error']]
+    latencies = sorted(r['completion_ms'] for r in valid)
+    duration = max(r['finish_s'] for r in records)
+    return {'policy': policy, 'tasks': len(records), 'successes': len(valid),
+        'errors': len(records) - len(valid),
+        'mean_completion_ms': statistics.mean(latencies) if latencies else '',
+        'p95_completion_ms': latencies[math.ceil(.95 * len(latencies)) - 1] if latencies else '',
+        'throughput_tasks_per_s': len(valid) / duration,
+        'cloud_fraction': sum(r['place'] == 'cloud' for r in records) / len(records),
+        'transferred_input_bytes': sum(r['input_bytes'] for r in records if r['place'] == 'cloud'),
+        'request_body_bytes': sum(r['request_body_bytes'] for r in records),
+        'response_body_bytes': sum(r['response_body_bytes'] for r in records),
+        'duration_s': duration}, records, telemetry
 
 def write_csv(path, rows):
-    with path.open("w", newline="", encoding="utf-8") as stream:
+    if not rows:
+        return
+    with Path(path).open('w', newline='', encoding='utf-8') as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
 
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", required=True)
-    parser.add_argument("--output", default="live_results")
-    parser.add_argument("--tasks", type=int, default=20)
-    parser.add_argument("--seeds", type=int, default=3)
-    parser.add_argument("--arrival-gap-ms", type=float, default=35)
-    parser.add_argument("--edge-workers", type=int, default=1)
-    parser.add_argument("--cloud-workers", type=int, default=4)
+    parser.add_argument('--url', required=True)
+    parser.add_argument('--output', default='live_results')
+    parser.add_argument('--tasks', type=int, default=40)
+    parser.add_argument('--seeds', type=int, default=8)
+    parser.add_argument('--arrival-gap-ms', type=float, default=100)
+    parser.add_argument('--edge-workers', type=int, default=1)
+    parser.add_argument('--cloud-workers', type=int, default=4)
+    parser.add_argument('--calibrate-only', action='store_true')
+    parser.add_argument('--protocol', type=Path)
     args = parser.parse_args()
-    if not args.url.startswith("https://"):
-        parser.error("--url must be an HTTPS endpoint")
+    if not args.url.startswith('https://') or '?' in args.url:
+        parser.error('Use an HTTPS endpoint without query parameters; key belongs in environment')
     if min(args.tasks, args.seeds, args.edge_workers, args.cloud_workers) < 1 or args.arrival_gap_ms <= 0:
-        parser.error("tasks, seeds, worker counts and arrival gap must be positive")
-    key = os.environ.get("AZURE_FUNCTION_KEY")
+        parser.error('Positive counts and arrival gap required')
+    key = os.environ.get('AZURE_FUNCTION_KEY')
     if not key:
-        sys.exit("Set AZURE_FUNCTION_KEY in your shell; do not put it in the command or source code.")
+        parser.error('AZURE_FUNCTION_KEY must be set privately in the execution environment')
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    model = calibrate(args.url, key)
-    summaries, task_rows = [], []
-    for i in range(args.seeds):
-        seed = 3001 + i
+    settings = {k: v for k, v in vars(args).items() if k not in ('protocol', 'calibrate_only', 'output')}
+    if args.protocol:
+        protocol = json.loads(args.protocol.read_text())
+        if protocol['settings'] != settings:
+            parser.error('Settings differ from frozen protocol')
+        model = protocol['model']
+    else:
+        if not args.calibrate_only:
+            parser.error('Run --calibrate-only first, then use --protocol for final runs')
+        model = calibrate(args.url, key, output)
+        orders = {}
+        for seed in range(3001, 3001 + args.seeds):
+            order = list(POLICIES)
+            random.Random(seed).shuffle(order)
+            orders[str(seed)] = order
+        protocol = {'frozen_utc': utc(), 'model': model, 'settings': settings,
+            'orders': orders, 'final_seeds': list(range(3001, 3001 + args.seeds)),
+            'iteration_classes': ITERATIONS, 'input_sizes_bytes': SIZES,
+            'adaptive_rule': 'calibrated own service + total full service of unfinished client tasks / pool workers; cloud iff strictly lower; no outcome fitting',
+            'p95': 'nearest rank ceil(0.95*N), successful tasks only; errors reported separately',
+            'telemetry': 'system CPU and RAM sampled during run, descriptive only, not policy input',
+            'transfer': 'JSON request and response bodies, excludes HTTP/TLS/TCP overhead',
+            'software': {'python': platform.python_version(), 'platform': platform.platform(), 'psutil': psutil.__version__},
+            'hardware': {'logical_cpus': psutil.cpu_count(), 'physical_cores': psutil.cpu_count(logical=False), 'ram_bytes': psutil.virtual_memory().total},
+            'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+        (output / 'protocol.json').write_text(json.dumps(protocol, indent=2))
+        print(json.dumps(model, indent=2))
+        return
+    if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != protocol['source_sha256']:
+        parser.error('Source changed after freeze')
+    summaries, task_rows, telemetry_rows = [], [], []
+    for seed in protocol['final_seeds']:
         jobs = trace(seed, args.tasks, args.arrival_gap_ms)
-        order = list(POLICIES)
-        random.Random(seed).shuffle(order)
-        for policy in order:
-            summary, records = run_policy(jobs, policy, model, args.url, key, args.edge_workers, args.cloud_workers)
-            summaries.append({"seed": seed, **summary})
-            task_rows.extend({"seed": seed, "policy": policy, **r} for r in records)
-            print(f"seed={seed} {policy}: mean={summary['mean_completion_ms']:.1f} ms, "
-                  f"p95={summary['p95_completion_ms']:.1f} ms")
-    write_csv(output / "summary.csv", summaries)
-    write_csv(output / "tasks.csv", task_rows)
-    (output / "protocol.json").write_text(json.dumps({"model": model, "settings": vars(args),
-        "final_seeds": list(range(3001, 3001 + args.seeds)), "policies": POLICIES}, indent=2), encoding="utf-8")
-    print(f"Saved {len(summaries)} runs in {output}")
+        for job in jobs:
+            job['expected_digest'] = compute(job)['digest']
+        (output / f'trace-{seed}.json').write_text(json.dumps(jobs, indent=2))
+        for order_index, policy in enumerate(protocol['orders'][str(seed)]):
+            start_utc = utc()
+            summary, records, telemetry = run_policy(jobs, policy, model, args.url, key, args.edge_workers, args.cloud_workers)
+            summaries.append({'seed': seed, 'order_index': order_index, 'utc_started': start_utc, **summary})
+            task_rows.extend({'seed': seed, 'policy': policy, **r} for r in records)
+            telemetry_rows.extend({'seed': seed, 'policy': policy, **r} for r in telemetry)
+            write_csv(output / 'summary.csv', summaries)
+            write_csv(output / 'tasks.csv', task_rows)
+            write_csv(output / 'telemetry.csv', telemetry_rows)
+            print(f"seed={seed} {policy}: mean={summary['mean_completion_ms']} errors={summary['errors']}", flush=True)
+    (output / 'completed.json').write_text(json.dumps({'utc': utc(), 'runs': len(summaries)}))
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

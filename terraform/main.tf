@@ -77,6 +77,7 @@ data "archive_file" "code" {
   type        = "zip"
   source_dir  = "${path.module}/../azure_function"
   output_path = "${path.module}/function.zip"
+  excludes    = ["__pycache__", "local.settings.json", ".venv"]
 }
 
 resource "azurerm_linux_function_app" "worker" {
@@ -93,6 +94,8 @@ resource "azurerm_linux_function_app" "worker" {
   app_settings = {
     FUNCTIONS_WORKER_RUNTIME       = "python"
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
+    PYTHON_THREADPOOL_THREAD_COUNT = "1"
+    FUNCTIONS_WORKER_PROCESS_COUNT = "1"
     ENABLE_ORYX_BUILD              = "true"
   }
 
