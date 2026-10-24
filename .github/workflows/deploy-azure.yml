@@ -62,7 +62,7 @@ jobs:
 
       - name: Check out the tested commit
         if: steps.config.outputs.build_image == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
