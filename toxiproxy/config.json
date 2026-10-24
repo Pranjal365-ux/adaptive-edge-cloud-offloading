@@ -1,10 +1,8 @@
-{
-  "proxies": [
-    {
-      "name": "cloud",
-      "listen": "0.0.0.0:8666",
-      "upstream": "cloud:8081",
-      "enabled": true
-    }
-  ]
-}
+[
+  {
+    "name": "cloud",
+    "listen": "0.0.0.0:8666",
+    "upstream": "cloud:8081",
+    "enabled": true
+  }
+]

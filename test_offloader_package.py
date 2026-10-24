@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from offloader.costs import CostModel
@@ -20,6 +22,12 @@ def context(**changes):
 
 
 class PackageTests(unittest.TestCase):
+    def test_toxiproxy_startup_config_uses_documented_array_shape(self):
+        config = json.loads(Path("toxiproxy/config.json").read_text(encoding="utf-8"))
+        self.assertIsInstance(config, list)
+        self.assertEqual(config[0]["name"], "cloud")
+        self.assertEqual(config[0]["listen"], "0.0.0.0:8666")
+
     def test_nearest_rank_and_seeded_bootstrap(self):
         values = list(range(1, 22))
         self.assertEqual(nearest_rank(values, .95), 20)
