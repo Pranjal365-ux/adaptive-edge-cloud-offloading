@@ -53,13 +53,22 @@ IMAGE_PIXELS = Histogram("edge_inspection_pixels", "Pixels inspected per image j
 COMPLETION = Histogram("edge_completion_seconds", "End-to-end task latency", ["policy"],
                        buckets=(.01, .05, .1, .25, .5, 1, 2, 5, 10, 30))
 QUEUE = Gauge("edge_queue_depth", "Queued or active local edge tasks")
+EDGE_WORKERS_IN_USE = Gauge("edge_worker_slots_in_use", "Edge worker slots currently processing work")
+EDGE_WORKER_CAPACITY = Gauge("edge_worker_slots_capacity", "Configured edge worker slots")
+EDGE_WORKER_UTILIZATION = Gauge("edge_worker_utilization_percent", "Edge worker slot utilization percentage")
+CLOUD_WORKER_UTILIZATION = Gauge("cloud_worker_utilization_percent", "Cloud worker slot utilization percentage")
+TASK_THROUGHPUT = Gauge("edge_tasks_per_minute", "Completed edge-gateway jobs in the trailing 60 seconds")
 _cloud_inflight_metric = Gauge("edge_cloud_inflight", "Cloud requests currently in flight")
 RTT = Gauge("edge_rtt_estimate_ms", "Measured cloud probe round-trip time")
 BANDWIDTH = Gauge("edge_bandwidth_estimate_mbps", "Application-level cloud probe throughput estimate")
 CLOUD_COST = Counter("edge_cloud_cost_usd_total", "Synthetic estimated cloud CPU cost")
 ERRORS = Counter("edge_errors_total", "Edge errors", ["kind"])
 _active_local = 0
+_active_edge_workers = 0
 _active_cloud = 0
+_cloud_worker_snapshot = {"available": False, "active_workers": 0, "queued_tasks": 0,
+                          "worker_capacity": CLOUD_WORKERS, "utilization_percent": 0}
+_completion_times: deque[float] = deque()
 _local_lock = asyncio.Lock()
 _breaker_lock = asyncio.Lock()
 _cloud_failures = 0
@@ -116,6 +125,8 @@ class RaceRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _events_signal
+    EDGE_WORKER_CAPACITY.set(EDGE_WORKERS)
+    EDGE_WORKER_UTILIZATION.set(0)
     app.state.pool = ProcessPoolExecutor(max_workers=EDGE_WORKERS)
     app.state.semaphore = asyncio.Semaphore(EDGE_WORKERS)
     app.state.client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0))
@@ -154,6 +165,14 @@ def add_event(event: dict) -> None:
     _events.append(event)
     if _events_signal and _events_signal.empty():
         _events_signal.put_nowait(None)
+
+
+def record_completion() -> None:
+    now = time.monotonic()
+    _completion_times.append(now)
+    while _completion_times and now - _completion_times[0] > 60:
+        _completion_times.popleft()
+    TASK_THROUGHPUT.set(len(_completion_times))
 
 
 def choose_destination(payload: ComputeRequest, active_local: int) -> tuple[str, dict]:
@@ -203,21 +222,29 @@ def learn_service_rate(destination: str, work_units: int, compute_ms: float) -> 
 
 
 async def run_edge(payload: ComputeRequest, request_id: str):
-    global _active_local
+    global _active_local, _active_edge_workers
     async with _local_lock:
         _active_local += 1
         active = _active_local
-    QUEUE.set(active)
+    QUEUE.set(max(0, active - EDGE_WORKERS))
     try:
         async with app.state.semaphore:
-            result = await asyncio.get_running_loop().run_in_executor(
-                app.state.pool, execute, payload.model_dump())
-        learn_service_rate("edge", payload.work_units, result["compute_ms"])
-        return result
+            _active_edge_workers += 1
+            EDGE_WORKERS_IN_USE.set(_active_edge_workers)
+            EDGE_WORKER_UTILIZATION.set(100 * _active_edge_workers / EDGE_WORKERS)
+            try:
+                result = await asyncio.get_running_loop().run_in_executor(
+                    app.state.pool, execute, payload.model_dump())
+                learn_service_rate("edge", payload.work_units, result["compute_ms"])
+                return result
+            finally:
+                _active_edge_workers -= 1
+                EDGE_WORKERS_IN_USE.set(_active_edge_workers)
+                EDGE_WORKER_UTILIZATION.set(100 * _active_edge_workers / EDGE_WORKERS)
     finally:
         async with _local_lock:
             _active_local -= 1
-            QUEUE.set(_active_local)
+            QUEUE.set(max(0, _active_local - EDGE_WORKERS))
 
 
 async def cloud_open() -> bool:
@@ -403,6 +430,7 @@ async def submit_task(payload: ComputeRequest, request: Request):
         INSPECTIONS.labels(destination=destination, verdict=result["verdict"]).inc()
         DEFECTS.labels(destination=destination).inc(result.get("defect_count", 0))
         IMAGE_PIXELS.observe(result["pixels_processed"])
+    record_completion()
     elapsed = time.perf_counter() - start
     COMPLETION.labels(policy=decision["policy"]).observe(elapsed)
     event = {"request_id": request_id, "task_id": payload.task_id, "task_type": payload.task_type,
@@ -419,9 +447,100 @@ async def submit_task(payload: ComputeRequest, request: Request):
         "completion_ms": round(elapsed * 1000, 3), "request_id": request_id}
 
 
+@app.post("/tasks/compare")
+async def compare_task(payload: ComputeRequest, request: Request):
+    """Run the same image concurrently on both live workers without changing policy."""
+    async def run_edge_comparison() -> dict:
+        started = time.perf_counter()
+        try:
+            result = await run_edge(payload, f"{payload.task_id}-edge")
+            return {**result, "available": True,
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)}
+        except (ValueError, RuntimeError) as exc:
+            return {"available": False, "error": type(exc).__name__}
+
+    async def run_cloud_comparison() -> dict:
+        global _active_cloud
+        if await cloud_open():
+            return {"available": False, "error": "cloud circuit breaker is open"}
+        started = time.perf_counter()
+        request_id = request.headers.get("x-request-id", payload.task_id)[:128]
+        _active_cloud += 1
+        _cloud_inflight_metric.set(_active_cloud)
+        try:
+            response = await app.state.client.post(f"{CLOUD_URL}/compute",
+                json={key: getattr(payload, key) for key in
+                      ("task_type", "image_base64", "image_width", "image_height", "sensitivity")},
+                headers={"X-API-Key": CLOUD_API_KEY, "X-Request-ID": f"{request_id}-cloud"})
+            response.raise_for_status()
+            result = response.json()
+            learn_service_rate("cloud", payload.work_units, result.get("compute_ms", 0))
+            await record_cloud_success()
+            return {**result, "available": True,
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)}
+        except (httpx.HTTPError, ValueError) as exc:
+            await record_cloud_failure()
+            return {"available": False, "error": type(exc).__name__}
+        finally:
+            _active_cloud -= 1
+            _cloud_inflight_metric.set(_active_cloud)
+
+    edge_result, cloud_result = await asyncio.gather(
+        run_edge_comparison(), run_cloud_comparison())
+    for destination, result in (("edge", edge_result), ("cloud", cloud_result)):
+        if not result["available"]:
+            continue
+        TASKS.labels(policy="comparison", destination=destination).inc()
+        COMPLETION.labels(policy="comparison").observe(result["elapsed_ms"] / 1000)
+        INSPECTIONS.labels(destination=destination, verdict=result["verdict"]).inc()
+        DEFECTS.labels(destination=destination).inc(result.get("defect_count", 0))
+        IMAGE_PIXELS.observe(result["pixels_processed"])
+    record_completion()
+    if cloud_result["available"]:
+        CLOUD_COST.inc(cloud_result.get("compute_ms", 0) / 1000 * CLOUD_COST_PER_SECOND)
+    winner = None
+    if edge_result["available"] and cloud_result["available"]:
+        winner = "edge" if edge_result["elapsed_ms"] <= cloud_result["elapsed_ms"] else "cloud"
+    elapsed_candidates = [item["elapsed_ms"] for item in (edge_result, cloud_result)
+                          if item["available"]]
+    add_event({"request_id": request.headers.get("x-request-id", payload.task_id),
+        "task_id": payload.task_id, "task_type": payload.task_type, "source": payload.source,
+        "priority": payload.priority, "record_count": payload.record_count,
+        "workload_profile": payload.workload_profile, "policy": "comparison",
+        "destination": "comparison", "reason": "Same image processed concurrently on both workers",
+        "completion_ms": round(max(elapsed_candidates, default=0), 3), "fallback": False,
+        "verdict": None, "defect_count": None})
+    return {"task_id": payload.task_id, "source": payload.source,
+            "active_policy": POLICY, "winner": winner,
+            "edge": edge_result, "cloud": cloud_result}
+
+
 @app.get("/status")
-def status():
-    return {"policy": POLICY, "queue_depth": _active_local, "rtt_ms": _rtt_ewma_ms,
+async def status():
+    try:
+        worker_status = await app.state.client.get(f"{CLOUD_URL}/status",
+            headers={"X-API-Key": CLOUD_API_KEY}, timeout=httpx.Timeout(0.8, connect=0.5))
+        worker_status.raise_for_status()
+        _cloud_worker_snapshot.update(worker_status.json())
+        _cloud_worker_snapshot["available"] = True
+        CLOUD_WORKER_UTILIZATION.set(_cloud_worker_snapshot["utilization_percent"])
+    except (httpx.HTTPError, ValueError, TimeoutError):
+        _cloud_worker_snapshot["available"] = False
+    now = time.monotonic()
+    while _completion_times and now - _completion_times[0] > 60:
+        _completion_times.popleft()
+    TASK_THROUGHPUT.set(len(_completion_times))
+    edge_utilization = 100 * _active_edge_workers / EDGE_WORKERS
+    return {"policy": POLICY, "queue_depth": max(0, _active_local - EDGE_WORKERS),
+            "edge_active_workers": _active_edge_workers, "edge_worker_capacity": EDGE_WORKERS,
+            "edge_utilization_percent": round(edge_utilization, 1),
+            "cloud_active_workers": _cloud_worker_snapshot["active_workers"],
+            "cloud_queued_tasks": _cloud_worker_snapshot["queued_tasks"],
+            "cloud_worker_capacity": _cloud_worker_snapshot["worker_capacity"],
+            "cloud_utilization_percent": _cloud_worker_snapshot["utilization_percent"],
+            "cloud_available": _cloud_worker_snapshot["available"],
+            "cloud_replica": _cloud_worker_snapshot.get("replica"),
+            "throughput_tasks_per_minute": len(_completion_times), "rtt_ms": _rtt_ewma_ms,
             "bandwidth_mbps": _bandwidth_ewma_mbps,
             "circuit_open": time.monotonic() < _breaker_open_until,
             "recent_events": list(_events), "build_sha": BUILD_SHA}

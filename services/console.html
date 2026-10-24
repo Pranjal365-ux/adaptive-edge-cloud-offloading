@@ -59,22 +59,27 @@
     .dashboard { display: grid; grid-template-columns: minmax(0, 1.58fr) minmax(315px, .9fr); gap: 16px; align-items: stretch; }
     .card { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 10px 32px #00000012; }
     .card-pad { padding: 19px 20px; }
-    .chart-card { min-height: 385px; overflow: hidden; }
+    .chart-card { min-height: 430px; overflow: hidden; }
     .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
     .card-title { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
     .card-note { margin: 4px 0 0; color: var(--subtle); font-size: 12px; }
-    .chart-topline { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 23px 0 8px; }
-    .chart-current { display: flex; align-items: baseline; gap: 8px; }
-    .chart-value { color: #eef7ff; font-size: clamp(30px, 4vw, 42px); line-height: 1; font-weight: 720; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
-    .chart-unit { color: #8fa1b4; font-size: 13px; }
-    .chart-range { color: var(--subtle); font-size: 11px; }
-    .chart-switch { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid #273748; border-radius: 9px; background: #0d141d; }
-    .chart-switch button { padding: 6px 9px; border: 0; border-radius: 6px; color: #91a0af; background: transparent; font-size: 11px; cursor: pointer; }
-    .chart-switch button[aria-pressed="true"] { color: #eaf4ff; background: #25364a; }
-    .plot-wrap { position: relative; height: 205px; margin: 0 -2px; }
-    #performance-chart { display: block; width: 100%; height: 100%; }
-    .chart-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; color: #8291a0; font-size: 11px; }
-    .chart-caption { margin: 12px 0 0; padding-top: 11px; border-top: 1px solid #202c39; color: #8493a2; font-size: 11px; }
+    .utilization-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+    .util-panel { min-width: 0; padding: 14px; border: 1px solid #273748; border-radius: 12px; background: #0c141d; }
+    .util-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .util-name { margin: 0; font-size: 13px; font-weight: 700; }
+    .util-number { color: #eaf5ff; font: 700 24px/1 ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .util-panel.edge .util-number { color: #83c5ff; }
+    .util-panel.cloud .util-number { color: #74dfb3; }
+    .util-caption { margin: 4px 0 0; color: #8293a2; font-size: 10px; }
+    .util-chart-wrap { height: 132px; margin-top: 10px; }
+    .util-chart { display: block; width: 100%; height: 100%; }
+    .util-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; color: #8796a5; font-size: 10px; }
+    .telemetry-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }
+    .telemetry-kpi { min-width: 0; padding: 10px 11px; border: 1px solid #263544; border-radius: 10px; background: #121c27; }
+    .telemetry-kpi span { display: block; color: #8293a2; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+    .telemetry-kpi strong { display: block; margin-top: 4px; overflow: hidden; color: #e3edf6; font: 650 16px ui-monospace, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .telemetry-kpi small { display: block; margin-top: 2px; color: #718292; font-size: 9px; }
+    .chart-caption { margin: 10px 0 0; color: #8493a2; font-size: 10px; }
     .side-stack { display: grid; grid-template-rows: auto 1fr; gap: 16px; }
     .policy-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
     .policy-value { margin-top: 6px; color: #f0f5fb; font-size: 22px; font-weight: 700; letter-spacing: -.03em; }
@@ -142,6 +147,19 @@
     .raw-result summary { cursor: pointer; }
     .raw-result pre { max-height: 145px; overflow: auto; padding: 8px; border: 1px solid #243242; border-radius: 7px; color: #b6cce0; background: #0a1017; font: 9px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     .run-task-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; }
+    .run-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .compare-state { display: none; }
+    .compare-state.visible { display: block; }
+    .compare-summary { margin: 0 0 10px; padding: 9px 10px; border: 1px solid #2d4357; border-radius: 8px; color: #bad8ef; background: #122031; font-size: 10px; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .compare-panel { min-width: 0; padding: 10px; border: 1px solid #2b3c4e; border-radius: 10px; background: #0b121a; }
+    .compare-panel h4 { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: 11px; }
+    .compare-state .result-image { max-height: 170px; margin: 9px 0; }
+    .compare-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .compare-stats div { padding: 6px; border-radius: 6px; background: #121c27; }
+    .compare-stats span { display: block; color: #8192a1; font-size: 8px; }
+    .compare-stats strong { display: block; margin-top: 2px; color: #e5f1fc; font: 600 11px ui-monospace, Consolas, monospace; }
+    .compare-error { color: #ffaaaa; font-size: 10px; }
     .run-help { color: #768697; font-size: 10px; }
     .scenario-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
     .scenario-button { padding: 7px 10px; border: 1px solid #344355; border-radius: 8px; color: #b7c5d3; background: #151f2a; font-size: 11px; cursor: pointer; }
@@ -152,25 +170,12 @@
     .event-row { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid #222e3b; border-radius: 9px; background: #0e151e; }
     .event-marker { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
     .event-row.cloud .event-marker { background: var(--green); }
+    .event-row.comparison .event-marker { background: linear-gradient(135deg, var(--blue), var(--green)); }
     .event-main { min-width: 0; }
     .event-destination { font-size: 11px; font-weight: 700; }
     .event-reason { overflow: hidden; margin-top: 2px; color: #8998a7; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .event-time { color: #b7c5d2; font: 11px ui-monospace, Consolas, monospace; white-space: nowrap; }
     .empty-state { padding: 14px 4px; color: #7e8d9c; font-size: 11px; }
-    .race-card { overflow: hidden; }
-    .race-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 20px; border-bottom: 1px solid #24303c; }
-    .race-header h2 { margin: 0; font-size: 15px; }
-    .race-header p { margin: 3px 0 0; color: var(--subtle); font-size: 11px; }
-    .race-body { padding: 16px 20px 20px; }
-    .race-note { margin: 0 0 14px; color: #8998a7; font-size: 11px; }
-    .race-list { display: grid; gap: 11px; }
-    .race-row { display: grid; grid-template-columns: 140px minmax(60px, 1fr) 78px; align-items: center; gap: 12px; }
-    .race-policy { overflow: hidden; color: #b6c4d2; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-    .race-track { height: 9px; overflow: hidden; border-radius: 999px; background: #202c38; }
-    .race-bar { height: 100%; min-width: 2px; border-radius: inherit; background: linear-gradient(90deg, #478de2, #65c7e8); transition: width .6s ease; }
-    .race-row.winner .race-bar { background: linear-gradient(90deg, #37bb91, #77e0b4); }
-    .race-value { color: #d4dee8; font: 11px ui-monospace, Consolas, monospace; text-align: right; }
-    .race-meta { margin-top: 14px; color: #7f8e9d; font-size: 10px; }
     .footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 21px; padding-top: 14px; border-top: 1px solid #202b38; color: #748393; font-size: 10px; }
     .toast { position: fixed; right: 20px; bottom: 20px; z-index: 5; max-width: min(420px, calc(100vw - 40px)); padding: 11px 14px; border: 1px solid #36516c; border-radius: 10px; color: #e9f5ff; background: #162433; box-shadow: 0 12px 34px #0008; font-size: 12px; opacity: 0; pointer-events: none; transform: translateY(8px); transition: .2s ease; }
     .toast.show { opacity: 1; transform: translateY(0); }
@@ -184,7 +189,7 @@
       .intro-links { padding: 0; }
       .dashboard { grid-template-columns: 1fr; }
       .side-stack { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
-      .chart-card { min-height: 350px; }
+      .chart-card { min-height: 430px; }
     }
     @media (max-width: 500px) {
       .side-stack { grid-template-columns: 1fr; }
@@ -192,10 +197,11 @@
       .input-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .output-placeholder { min-height: 110px; }
       .card-pad, .control-card, .events-card { padding: 16px; }
-      .chart-card { min-height: 345px; }
-      .plot-wrap { height: 185px; }
-      .race-header { align-items: flex-start; flex-direction: column; }
-      .race-row { grid-template-columns: 100px minmax(40px, 1fr) 68px; gap: 8px; }
+      .utilization-grid { grid-template-columns: 1fr; }
+      .telemetry-kpis { grid-template-columns: 1fr 1fr; }
+      .compare-grid { grid-template-columns: 1fr; }
+      .run-task-row { align-items: flex-start; flex-direction: column; }
+      .run-actions { width: 100%; }
       .footer { flex-direction: column; gap: 5px; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
@@ -230,19 +236,28 @@
       <section class="dashboard" aria-label="Live telemetry">
         <article class="card chart-card card-pad">
           <div class="card-head">
-            <div><h2 class="card-title">Cloud link · live performance</h2><p class="card-note">Measured by the edge gateway probe</p></div>
-            <span id="chart-live" class="service-pill"><span class="dot"></span><span>Live · 2s</span></span>
+            <div><h2 class="card-title">Worker utilization · live</h2><p class="card-note">Busy image-processing slots over the last minute</p></div>
+            <span id="telemetry-live" class="service-pill"><span class="dot"></span><span>Live · 2s</span></span>
           </div>
-          <div class="chart-topline">
-            <div class="chart-current"><span id="chart-value" class="chart-value">—</span><span id="chart-unit" class="chart-unit">ms RTT</span></div>
-            <div class="chart-switch" role="group" aria-label="Performance graph metric">
-              <button type="button" data-metric="rtt" aria-pressed="true">Round trip</button>
-              <button type="button" data-metric="bandwidth" aria-pressed="false">Throughput</button>
-            </div>
+          <div class="utilization-grid">
+            <article class="util-panel edge">
+              <div class="util-panel-head"><div><h3 class="util-name">Edge workers</h3><p class="util-caption">Local processing pool</p></div><strong id="edge-util-value" class="util-number">0%</strong></div>
+              <div class="util-chart-wrap"><canvas id="edge-util-chart" class="util-chart" role="img" aria-label="Edge worker slot utilization over the last minute"></canvas></div>
+              <div class="util-foot"><span id="edge-util-slots">0 / 2 slots busy</span><span>60 sec</span></div>
+            </article>
+            <article class="util-panel cloud">
+              <div class="util-panel-head"><div><h3 class="util-name">Cloud workers</h3><p class="util-caption">Remote processing pool</p></div><strong id="cloud-util-value" class="util-number">Waiting</strong></div>
+              <div class="util-chart-wrap"><canvas id="cloud-util-chart" class="util-chart" role="img" aria-label="Cloud worker slot utilization over the last minute"></canvas></div>
+              <div class="util-foot"><span id="cloud-util-slots">Waiting for cloud telemetry</span><span>60 sec</span></div>
+            </article>
           </div>
-          <div class="plot-wrap"><canvas id="performance-chart" role="img" aria-label="Live cloud link performance graph"></canvas></div>
-          <div class="chart-foot"><span id="chart-min">Min —</span><span>Last 60 seconds</span><span id="chart-max">Max —</span></div>
-          <p class="chart-caption">The line uses real probe observations. RTT includes application and service overhead; throughput is application-level, not raw link capacity.</p>
+          <div class="telemetry-kpis" aria-label="Live throughput and network metrics">
+            <div class="telemetry-kpi"><span>Task throughput</span><strong id="kpi-task-throughput">0 / min</strong><small>Trailing 60 seconds</small></div>
+            <div class="telemetry-kpi"><span>Link throughput</span><strong id="kpi-link-throughput">— Mbps</strong><small>Application probe estimate</small></div>
+            <div class="telemetry-kpi"><span>Cloud round trip</span><strong id="kpi-rtt">— ms</strong><small>Includes service overhead</small></div>
+            <div class="telemetry-kpi"><span>Edge queue</span><strong id="kpi-edge-queue">0 waiting</strong><small>Jobs waiting for a local slot</small></div>
+          </div>
+          <p class="chart-caption">Utilization is busy worker slots ÷ configured worker slots, not host CPU percentage. Cloud shows the responding replica; its graph pauses when the worker is unreachable.</p>
         </article>
 
         <div class="side-stack">
@@ -315,9 +330,27 @@
                 <p id="result-reason" class="decision-note"></p>
                 <details class="raw-result"><summary>View full response JSON</summary><pre id="response-json"></pre></details>
               </div>
+              <div id="compare-state" class="compare-state" aria-live="polite">
+                <div id="compare-summary" class="compare-summary">Running the same image on both worker pools at the same time.</div>
+                <div class="compare-grid">
+                  <article class="compare-panel">
+                    <h4><span>Edge worker</span><span id="compare-edge-time">—</span></h4>
+                    <img id="compare-edge-image" class="result-image" alt="Image annotated by the edge worker">
+                    <div class="compare-stats"><div><span>Inspection</span><strong id="compare-edge-verdict">—</strong></div><div><span>Suspected defects</span><strong id="compare-edge-defects">—</strong></div></div>
+                    <p id="compare-edge-error" class="compare-error"></p>
+                  </article>
+                  <article class="compare-panel">
+                    <h4><span>Cloud worker</span><span id="compare-cloud-time">—</span></h4>
+                    <img id="compare-cloud-image" class="result-image" alt="Image annotated by the cloud worker">
+                    <div class="compare-stats"><div><span>Inspection</span><strong id="compare-cloud-verdict">—</strong></div><div><span>Suspected defects</span><strong id="compare-cloud-defects">—</strong></div></div>
+                    <p id="compare-cloud-error" class="compare-error"></p>
+                  </article>
+                </div>
+                <details class="raw-result"><summary>View comparison response</summary><pre id="compare-response"></pre></details>
+              </div>
             </section>
           </div>
-          <div class="run-task-row"><span class="run-help">The image goes to the worker selected by the active edge/cloud policy.</span><button id="send" class="button primary" type="button">Inspect image →</button></div>
+          <div class="run-task-row"><span class="run-help">Inspect follows the active policy. Compare runs the same image on both workers in parallel.</span><div class="run-actions"><button id="compare-image" class="button small" type="button">Compare edge + cloud</button><button id="send" class="button primary" type="button">Inspect image →</button></div></div>
           <div class="step-label" style="margin-top:20px">02 · Change the network</div>
           <h3 class="control-title">Apply a network condition</h3>
           <div class="scenario-list" role="group" aria-label="Network scenarios">
@@ -337,21 +370,6 @@
         </article>
       </section>
 
-      <div class="section-heading">
-        <div><h2>Same-trace policy comparison</h2><p>Simulation only · every policy receives the same seeded workload.</p></div>
-      </div>
-      <section class="card race-card" aria-label="Simulated policy comparison">
-        <div class="race-header">
-          <div><h2>Which policy handled this trace best?</h2><p>Random-walk network · 100 tasks · seed 3001</p></div>
-          <button id="run-race" class="button small" type="button">Run comparison</button>
-        </div>
-        <div class="race-body">
-          <p id="race-note" class="race-note">This is a reproducible simulator replay, not live traffic. Shorter bars mean lower mean completion time.</p>
-          <div id="race-results" class="race-list"><div class="empty-state">Run the comparison when you’re ready; it won’t interrupt live tasks.</div></div>
-          <div id="race-meta" class="race-meta"></div>
-        </div>
-      </section>
-
       <footer class="footer">
         <span>OffloadOps · local edge and cloud observability lab</span>
         <span>Cloud cost shown by the simulator is synthetic; it is not an Azure invoice.</span>
@@ -363,8 +381,7 @@
   <script>
     (() => {
       const $ = id => document.getElementById(id);
-      const history = { rtt: [], bandwidth: [] };
-      let metric = 'rtt';
+      const history = { edge: [], cloud: [] };
       let latestDestination = null;
       let submittedPayloadJson = null;
       let previewTaskId = null;
@@ -474,12 +491,16 @@
         if (submittedPayloadJson && preview !== submittedPayloadJson) {
           $('output-tag').textContent = 'Input changed';
           $('result-reason').textContent = 'The job settings changed after this result. Run the inspection again to process the new input.';
+          if ($('compare-state').classList.contains('visible')) {
+            $('compare-summary').textContent = 'The image or settings changed after this comparison. Run Compare edge + cloud again to compare the current input.';
+          }
         }
       }
 
       function showOutputPlaceholder() {
         $('output-placeholder').style.display = 'grid';
         $('result-state').classList.remove('visible');
+        $('compare-state').classList.remove('visible');
         $('output-tag').textContent = 'Ready';
         submittedPayloadJson = null;
       }
@@ -487,6 +508,7 @@
       function showTaskRunning(payload) {
         submittedPayloadJson = JSON.stringify(envelopeFor(payload), null, 2);
         $('output-placeholder').style.display = 'none';
+        $('compare-state').classList.remove('visible');
         $('result-state').classList.add('visible');
         $('output-tag').textContent = 'Running';
         const badge = $('destination-badge');
@@ -527,8 +549,54 @@
         $('response-json').textContent = JSON.stringify(summary, null, 2);
       }
 
+      function showCompareRunning(payload) {
+        submittedPayloadJson = JSON.stringify(envelopeFor(payload), null, 2);
+        $('output-placeholder').style.display = 'none';
+        $('result-state').classList.remove('visible');
+        $('compare-state').classList.add('visible');
+        $('output-tag').textContent = 'Comparing';
+        $('compare-summary').textContent = 'Both workers are processing the same image in parallel. The active routing policy is unchanged.';
+        ['edge', 'cloud'].forEach(worker => {
+          $(`compare-${worker}-time`).textContent = 'Running…';
+          $(`compare-${worker}-verdict`).textContent = 'Processing';
+          $(`compare-${worker}-defects`).textContent = '—';
+          $(`compare-${worker}-image`).removeAttribute('src');
+          $(`compare-${worker}-error`).textContent = '';
+        });
+        $('compare-response').textContent = 'Waiting for both workers…';
+      }
+
+      function showCompareResult(result, payload) {
+        $('output-tag').textContent = 'Live comparison';
+        const summaries = {};
+        ['edge', 'cloud'].forEach(worker => {
+          const outcome = result[worker] || {available: false, error: 'No worker response'};
+          const label = worker[0].toUpperCase() + worker.slice(1);
+          $(`compare-${worker}-time`).textContent = outcome.available
+            ? Number(outcome.elapsed_ms).toFixed(1) + ' ms'
+            : 'Unavailable';
+          $(`compare-${worker}-verdict`).textContent = outcome.available ? outcome.verdict : '—';
+          $(`compare-${worker}-defects`).textContent = outcome.available
+            ? Number(outcome.defect_count || 0).toLocaleString() : '—';
+          $(`compare-${worker}-error`).textContent = outcome.available ? '' : `${label} did not complete: ${outcome.error || 'worker unavailable'}`;
+          if (outcome.annotated_image_base64) {
+            $(`compare-${worker}-image`).src = 'data:image/jpeg;base64,' + outcome.annotated_image_base64;
+          }
+          const {annotated_image_base64, ...summary} = outcome;
+          summaries[worker] = summary;
+        });
+        const unavailable = ['edge', 'cloud'].filter(worker => !result[worker]?.available);
+        const winner = result.winner
+          ? `${result.winner[0].toUpperCase() + result.winner.slice(1)} completed this run faster.`
+          : unavailable.length ? `${unavailable.join(' and ')} worker unavailable; no timing winner.`
+            : 'No timing winner was reported.';
+        $('compare-summary').textContent = `${payload.source} · ${winner} Times include each worker path; cloud time includes the network round trip.`;
+        $('compare-response').textContent = JSON.stringify({task_id: result.task_id, winner: result.winner, ...summaries}, null, 2);
+      }
+
       function showTaskError(error) {
         $('output-placeholder').style.display = 'none';
+        $('compare-state').classList.remove('visible');
         $('result-state').classList.add('visible');
         $('output-tag').textContent = 'Failed';
         const badge = $('destination-badge'); badge.className = 'destination-badge error'; badge.textContent = 'NO RESULT';
@@ -546,11 +614,13 @@
         latestDestination = destination;
         const edge = $('route-edge');
         const cloud = $('route-cloud');
-        edge.classList.toggle('active', destination === 'edge');
-        cloud.classList.toggle('active', destination === 'cloud');
-        $('link-one').classList.toggle('active', destination === 'cloud');
-        $('link-two').classList.toggle('active', destination === 'cloud');
-        const status = destination === 'cloud' ? 'Cloud worker handled the latest task' : 'Edge workers handled the latest task';
+        const comparison = destination === 'comparison';
+        edge.classList.toggle('active', comparison || destination === 'edge');
+        cloud.classList.toggle('active', comparison || destination === 'cloud');
+        $('link-one').classList.toggle('active', comparison || destination === 'cloud');
+        $('link-two').classList.toggle('active', comparison || destination === 'cloud');
+        const status = comparison ? 'Both worker pools processed the same image'
+          : destination === 'cloud' ? 'Cloud worker handled the latest task' : 'Edge workers handled the latest task';
         $('route-summary').innerHTML = `<span class="dot"></span><span>${escapeHtml(fallback ? 'Cloud unavailable · completed locally as fallback' : status)}${reason ? ` · ${escapeHtml(reason)}` : ''}</span>`;
       }
 
@@ -563,12 +633,14 @@
         }
         $('events').innerHTML = rows.map(event => {
           const destination = String(event.destination || 'edge').toLowerCase();
-          const label = destination === 'cloud' ? 'CLOUD' : 'EDGE';
-          const outcome = event.verdict ? event.verdict + ' · ' + (event.defect_count || 0) + ' suspected defects' : 'Task completed';
-          return `<div class="event-row ${destination === 'cloud' ? 'cloud' : ''}"><span class="event-marker"></span><div class="event-main"><div class="event-destination">${label}${event.fallback ? ' · FALLBACK' : ''} · ${escapeHtml(event.task_id || event.request_id || 'JOB')}</div><div class="event-reason">${escapeHtml(event.source || 'source')} · ${escapeHtml(outcome)} · ${escapeHtml(event.reason || 'Policy decision')}</div></div><span class="event-time">${Number(event.completion_ms || 0).toFixed(1)} ms</span></div>`;
+          const label = destination === 'comparison' ? 'EDGE + CLOUD' : destination === 'cloud' ? 'CLOUD' : 'EDGE';
+          const outcome = destination === 'comparison' ? 'Live parallel comparison'
+            : event.verdict ? event.verdict + ' · ' + (event.defect_count || 0) + ' suspected defects' : 'Task completed';
+          const eventClass = destination === 'cloud' ? 'cloud' : destination === 'comparison' ? 'comparison' : '';
+          return `<div class="event-row ${eventClass}"><span class="event-marker"></span><div class="event-main"><div class="event-destination">${label}${event.fallback ? ' · FALLBACK' : ''} · ${escapeHtml(event.task_id || event.request_id || 'JOB')}</div><div class="event-reason">${escapeHtml(event.source || 'source')} · ${escapeHtml(outcome)} · ${escapeHtml(event.reason || 'Policy decision')}</div></div><span class="event-time">${Number(event.completion_ms || 0).toFixed(1)} ms</span></div>`;
         }).join('');
         const newest = rows[0];
-        if (newest) updateRoute(newest.destination, newest.fallback, '');
+        if (newest && latestDestination !== 'comparison') updateRoute(newest.destination, newest.fallback, '');
       }
 
       function addPoint(name, value) {
@@ -580,8 +652,8 @@
         while (points.length && now - points[0].time > 60_000) points.shift();
       }
 
-      function drawChart() {
-        const canvas = $('performance-chart');
+      function drawUtilizationChart(name, color) {
+        const canvas = $(`${name}-util-chart`);
         const rect = canvas.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
         const ratio = window.devicePixelRatio || 1;
@@ -590,55 +662,47 @@
         if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
         const ctx = canvas.getContext('2d');
         ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-        const w = rect.width, h = rect.height;
-        const left = 44, right = 8, top = 10, bottom = 18;
+        const w = rect.width, h = rect.height, left = 30, right = 5, top = 8, bottom = 17;
         const plotW = w - left - right, plotH = h - top - bottom;
         ctx.clearRect(0, 0, w, h);
-        const points = history[metric];
-        const raw = points.map(p => p.value);
-        let low = raw.length ? Math.min(...raw) : 0;
-        let high = raw.length ? Math.max(...raw) : (metric === 'rtt' ? 100 : 10);
-        if (metric === 'rtt') { low = Math.min(0, low * .85); high = Math.max(20, high * 1.18); }
-        else { low = Math.max(0, low * .75); high = Math.max(1, high * 1.2); }
-        if (high - low < (metric === 'rtt' ? 8 : .5)) high = low + (metric === 'rtt' ? 8 : .5);
-        ctx.font = '10px Segoe UI, sans-serif';
-        ctx.textAlign = 'right';
-        for (let i = 0; i <= 4; i++) {
-          const y = top + plotH * i / 4;
-          const value = high - (high - low) * i / 4;
-          ctx.strokeStyle = i === 4 ? '#273443' : '#202c38';
-          ctx.lineWidth = 1;
+        ctx.font = '9px Segoe UI, sans-serif'; ctx.textAlign = 'right';
+        [0, 50, 100].forEach(value => {
+          const y = top + plotH * (1 - value / 100);
+          ctx.strokeStyle = value === 0 ? '#334252' : '#202c38';
           ctx.beginPath(); ctx.moveTo(left, y + .5); ctx.lineTo(w - right, y + .5); ctx.stroke();
-          ctx.fillStyle = '#748493';
-          ctx.fillText(metric === 'rtt' ? `${value.toFixed(0)}` : `${value.toFixed(1)}`, left - 9, y + 3.5);
+          ctx.fillStyle = '#778999'; ctx.fillText(`${value}%`, left - 6, y + 3);
+        });
+        for (let i = 0; i <= 4; i++) {
+          const x = left + plotW * i / 4;
+          ctx.strokeStyle = '#1b2733'; ctx.beginPath();
+          ctx.moveTo(x + .5, top); ctx.lineTo(x + .5, top + plotH); ctx.stroke();
         }
-        for (let i = 0; i <= 6; i++) {
-          const x = left + plotW * i / 6;
-          ctx.strokeStyle = '#1b2733';
-          ctx.beginPath(); ctx.moveTo(x + .5, top); ctx.lineTo(x + .5, top + plotH); ctx.stroke();
-        }
-        if (points.length > 1) {
+        const points = history[name];
+        if (points.length) {
           const now = Date.now();
           const coords = points.map(point => ({
             x: left + plotW * Math.max(0, 1 - (now - point.time) / 60_000),
-            y: top + plotH * (1 - (point.value - low) / (high - low))
+            y: top + plotH * (1 - Math.min(100, Math.max(0, point.value)) / 100)
           }));
-          const line = ctx.createLinearGradient(left, 0, w - right, 0);
-          line.addColorStop(0, '#4c98f3'); line.addColorStop(1, '#71d9ed');
-          ctx.beginPath(); coords.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-          ctx.lineTo(coords[coords.length - 1].x, top + plotH); ctx.lineTo(coords[0].x, top + plotH); ctx.closePath();
+          if (coords.length === 1) coords.unshift({x: left + plotW * Math.max(0, 1 - (now - points[0].time) / 60_000), y: coords[0].y});
           const fill = ctx.createLinearGradient(0, top, 0, top + plotH);
-          fill.addColorStop(0, '#54a8ff35'); fill.addColorStop(1, '#54a8ff00');
+          fill.addColorStop(0, `${color}48`); fill.addColorStop(1, `${color}00`);
+          ctx.beginPath(); coords.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+          ctx.lineTo(coords[coords.length - 1].x, top + plotH); ctx.lineTo(coords[0].x, top + plotH); ctx.closePath();
           ctx.fillStyle = fill; ctx.fill();
-          ctx.beginPath(); coords.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-          ctx.strokeStyle = line; ctx.lineWidth = 2.3; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+          ctx.beginPath(); coords.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+          ctx.strokeStyle = color; ctx.lineWidth = 2.2; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
           const last = coords[coords.length - 1];
-          ctx.beginPath(); ctx.arc(last.x, last.y, 3.5, 0, Math.PI * 2); ctx.fillStyle = '#b9efff'; ctx.fill();
-          ctx.beginPath(); ctx.arc(last.x, last.y, 7, 0, Math.PI * 2); ctx.strokeStyle = '#61b8ff60'; ctx.lineWidth = 2; ctx.stroke();
+          ctx.beginPath(); ctx.arc(last.x, last.y, 3.2, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
         }
-        const label = metric === 'rtt' ? 'ms' : 'Mbps';
-        $('chart-min').textContent = `Min ${raw.length ? Math.min(...raw).toFixed(metric === 'rtt' ? 1 : 2) : '—'} ${label}`;
-        $('chart-max').textContent = `Max ${raw.length ? Math.max(...raw).toFixed(metric === 'rtt' ? 1 : 2) : '—'} ${label}`;
+        ctx.textAlign = 'center'; ctx.fillStyle = '#778999';
+        ['60s', '45s', '30s', '15s', 'now'].forEach((label, index) =>
+          ctx.fillText(label, left + plotW * index / 4, h - 2));
+      }
+
+      function drawCharts() {
+        drawUtilizationChart('edge', '#65b8ff');
+        drawUtilizationChart('cloud', '#55d6a3');
       }
 
       async function refresh() {
@@ -652,19 +716,32 @@
           health.querySelector('span:last-child').textContent = status.circuit_open ? 'Cloud fallback active' : 'Gateway connected';
           $('policy').textContent = String(status.policy || '—').replaceAll('_', ' ');
           $('policy-select').value = status.policy || 'adaptive';
-          $('queue').textContent = `Edge queue · ${status.queue_depth ?? 0}`;
           $('build').textContent = status.build_sha || '—';
-          addPoint('rtt', Number(status.rtt_ms));
-          addPoint('bandwidth', Number(status.bandwidth_mbps));
-          const current = metric === 'rtt' ? Number(status.rtt_ms) : Number(status.bandwidth_mbps);
-          $('chart-value').textContent = Number.isFinite(current) ? current.toFixed(metric === 'rtt' ? 1 : 2) : '—';
-          $('chart-unit').textContent = metric === 'rtt' ? 'ms RTT' : 'Mbps';
+          const edgePercent = Number(status.edge_utilization_percent || 0);
+          addPoint('edge', edgePercent);
+          $('edge-util-value').textContent = `${edgePercent.toFixed(0)}%`;
+          $('edge-util-slots').textContent = `${status.edge_active_workers ?? 0} / ${status.edge_worker_capacity ?? 0} slots busy`;
+          $('kpi-edge-queue').textContent = `${status.queue_depth ?? 0} waiting`;
+          $('kpi-task-throughput').textContent = `${Number(status.throughput_tasks_per_minute || 0).toFixed(0)} / min`;
+          $('kpi-link-throughput').textContent = `${Number(status.bandwidth_mbps || 0).toFixed(2)} Mbps`;
+          $('kpi-rtt').textContent = `${Number(status.rtt_ms || 0).toFixed(1)} ms`;
+          if (status.cloud_available) {
+            const cloudPercent = Number(status.cloud_utilization_percent || 0);
+            addPoint('cloud', cloudPercent);
+            $('cloud-util-value').textContent = `${cloudPercent.toFixed(0)}%`;
+            $('cloud-util-slots').textContent = `Replica ${status.cloud_replica || '—'} · ${status.cloud_active_workers ?? 0} / ${status.cloud_worker_capacity ?? 0} slots · ${status.cloud_queued_tasks ?? 0} queued`;
+            $('telemetry-live').classList.remove('warn');
+          } else {
+            $('cloud-util-value').textContent = 'Offline';
+            $('cloud-util-slots').textContent = 'Cloud worker telemetry unavailable';
+            $('telemetry-live').classList.add('warn');
+          }
           renderEvents(status.recent_events || []);
-          drawChart();
+          drawCharts();
         } catch (error) {
           const health = $('health'); health.classList.remove('warn'); health.classList.add('bad');
           health.querySelector('span:last-child').textContent = 'Gateway unavailable';
-          $('chart-live').classList.add('bad');
+          $('telemetry-live').classList.add('bad');
           setFeedback('Cannot reach the edge gateway. Check that the Docker Compose stack is running.');
         }
       }
@@ -702,6 +779,29 @@
         finally { button.disabled = false; button.textContent = 'Inspect image →'; }
       });
 
+      $('compare-image').addEventListener('click', async () => {
+        const button = $('compare-image');
+        const inspectButton = $('send');
+        button.disabled = true; inspectButton.disabled = true; button.textContent = 'Running both…';
+        try {
+          const payload = payloadFromForm();
+          updatePayloadPreview();
+          showCompareRunning(payload);
+          setFeedback('The same image is running on edge and cloud in parallel; the selected routing policy is not changed.');
+          const result = await api('/tasks/compare', 'POST', payload);
+          showCompareResult(result, payload);
+          updateRoute('comparison', false, result.winner ? `${result.winner} was faster for this run` : 'one worker unavailable');
+          setFeedback(`Live edge/cloud comparison finished for ${result.task_id}.`);
+          await refresh();
+          updateRoute('comparison', false, result.winner ? `${result.winner} was faster for this run` : 'one worker unavailable');
+        } catch (error) {
+          $('compare-summary').textContent = `Comparison failed: ${error.message}`;
+          $('output-tag').textContent = 'Failed';
+          setFeedback(`Comparison failed: ${error.message}`);
+          toast(error.message, true);
+        } finally { button.disabled = false; inspectButton.disabled = false; button.textContent = 'Compare edge + cloud'; }
+      });
+
       $('choose-image').addEventListener('click', () => $('inspection-file').click());
       $('sample-image').addEventListener('click', loadSampleImage);
       $('inspection-file').addEventListener('change', async event => {
@@ -725,34 +825,6 @@
         finally { button.disabled = false; }
       }));
 
-      document.querySelectorAll('[data-metric]').forEach(button => button.addEventListener('click', () => {
-        metric = button.dataset.metric;
-        document.querySelectorAll('[data-metric]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
-        const points = history[metric];
-        const current = points.length ? points[points.length - 1].value : NaN;
-        $('chart-value').textContent = Number.isFinite(current) ? current.toFixed(metric === 'rtt' ? 1 : 2) : '—';
-        $('chart-unit').textContent = metric === 'rtt' ? 'ms RTT' : 'Mbps';
-        drawChart();
-      }));
-
-      $('run-race').addEventListener('click', async () => {
-        const button = $('run-race'); button.disabled = true; button.textContent = 'Simulating…';
-        $('race-results').innerHTML = '<div class="empty-state">Replaying one seeded trace through all policies…</div>';
-        try {
-          const race = await api('/race', 'POST', {seed: 3001, tasks: 100, scenario: 'random_walk_bandwidth'});
-          const rows = race.results.slice().sort((a, b) => a.mean_completion_s - b.mean_completion_s);
-          const max = Math.max(...rows.map(row => row.mean_completion_s), .001);
-          const winner = rows[0]?.policy;
-          $('race-results').innerHTML = rows.map(row => {
-            const width = Math.max(2, row.mean_completion_s / max * 100);
-            return `<div class="race-row ${row.policy === winner ? 'winner' : ''}"><span class="race-policy">${escapeHtml(row.policy.replaceAll('_', ' '))}${row.policy === winner ? ' · fastest' : ''}</span><div class="race-track" role="img" aria-label="Mean completion relative to slowest policy"><div class="race-bar" style="width:${width.toFixed(1)}%"></div></div><span class="race-value">${Number(row.mean_completion_s).toFixed(3)} s</span></div>`;
-          }).join('');
-          $('race-meta').textContent = `Seed ${race.seed} · ${race.scenario} · ${race.tasks} tasks · winners: ${Object.entries(race.winners).map(([name, value]) => `${name.replaceAll('_', ' ')}: ${value.replaceAll('_', ' ')}`).join(' · ')}`;
-          $('race-note').textContent = 'Bars compare mean completion time: shorter is faster. The adaptive oracle sees exact simulator state and is an upper-bound comparison, not a live policy.';
-        } catch (error) { $('race-results').innerHTML = `<div class="empty-state">Comparison unavailable: ${escapeHtml(error.message)}</div>`; }
-        finally { button.disabled = false; button.textContent = 'Run again'; }
-      });
-
       $('present').addEventListener('click', () => {
         const enabled = document.body.classList.toggle('presentation');
         $('present').setAttribute('aria-pressed', String(enabled));
@@ -761,11 +833,11 @@
 
       const stream = new EventSource('/events');
       stream.onmessage = () => refresh();
-      stream.onerror = () => $('chart-live').classList.add('warn');
-      window.addEventListener('resize', drawChart);
+      stream.onerror = () => $('telemetry-live').classList.add('warn');
+      window.addEventListener('resize', drawCharts);
       refresh();
       window.setInterval(refresh, 2000);
-      window.setInterval(drawChart, 1000);
+      window.setInterval(drawCharts, 1000);
     })();
   </script>
 </body>

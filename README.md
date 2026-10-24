@@ -1,6 +1,6 @@
 # OffloadOps
 
-OffloadOps is a reproducible edge-to-cloud offloading project with a discrete-event simulator and a locally containerized service demo. It compares local-only, cloud-only, fixed-threshold, measured adaptive, and simulator-oracle policies. The console shows live container decisions separately from seeded simulator races.
+OffloadOps is a reproducible edge-to-cloud offloading project with a discrete-event simulator and a locally containerized service demo. It compares local-only, cloud-only, fixed-threshold, measured adaptive, and simulator-oracle policies. The console focuses on live image inspections, edge/cloud worker utilization, and network telemetry; the seeded simulator remains a separate evaluation tool.
 
 The approved course synopsis is [the project synopsis](docs/Adaptive_Task_Offloading_Synopsis.docx). Implementation and measurement boundaries are recorded in [the audit](docs/AUDIT.md), [decisions](docs/DECISIONS.md), and [verification log](docs/VERIFICATION.md).
 
@@ -52,7 +52,7 @@ Start the edge gateway, cloud worker, Toxiproxy, Prometheus, and Grafana:
 
 The console opens at [http://localhost:8000/console](http://localhost:8000/console). Grafana is at [http://localhost:3000](http://localhost:3000), and Prometheus is at [http://localhost:9090](http://localhost:9090). Those ports bind to loopback only. The local Grafana password is a demo default; set `GRAFANA_ADMIN_PASSWORD` in the PowerShell session before starting if you want a different local value.
 
-Use the UI to generate or upload a part image, review the image and inspection settings, then submit it. The result shows the edge/cloud route, PASS/REVIEW, suspected defects, compute and transfer timings, and an annotated image. Change policy or apply a Toxiproxy scenario to see how routing responds. `good`, `poor`, `flapping`, `random-walk`, and `lossy` scenarios are described under `scenarios/`. The `lossy` preset applies a connection timeout toxic; it does not emulate random packet-level loss. See [the inspection walkthrough](docs/SURFACE_INSPECTION.md) for the task semantics and limitations.
+Use the UI to generate or upload a part image, review the image and inspection settings, then submit it. The dashboard plots edge and cloud worker-slot utilization separately and shows task throughput, measured link throughput, cloud RTT, and edge queue depth. A single inspection follows the active routing policy; **Compare edge + cloud** runs the same image concurrently on both workers without changing that policy and shows both annotated outputs and elapsed times. Change policy or apply a Toxiproxy scenario to see how routing responds. `good`, `poor`, `flapping`, `random-walk`, and `lossy` scenarios are described under `scenarios/`. The `lossy` preset applies a connection timeout toxic; it does not emulate random packet-level loss. See [the inspection walkthrough](docs/SURFACE_INSPECTION.md) for the task semantics and limitations.
 
 The gateway API is also available directly:
 
@@ -100,6 +100,7 @@ Simulator cost is an explicit synthetic model and does not represent an Azure in
 - **Containers:** separate multi-stage edge and cloud images, non-root runtime users, health checks, bounded resources, and pinned direct service dependencies.
 - **Observability:** Prometheus metrics, Grafana provisioning, JSON request logs, correlation IDs, and optional OpenTelemetry export when `APPLICATIONINSIGHTS_CONNECTION_STRING` is configured. The SDK follows the [Azure Monitor OpenTelemetry Python configuration](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-configuration).
 - **Supply chain:** Dependabot checks Python, Docker, Terraform, and GitHub Actions dependencies; a tag or manual workflow can publish SHA-tagged images to GHCR.
+- **CI/CD:** pull requests and supported branch pushes run validation; version tags publish immutable images after quality gates; an operator selects a full-SHA image for protected Azure deployment. See [the CI/CD guide](docs/CICD.md).
 - **Infrastructure as code:** new Azure Container Apps environments are in `infra/`; `azure_function/` and `terraform/` retain the older Azure Functions prototype. The active deployment guide uses `infra/`.
 - **Secrets:** no `.env`, API key, Terraform state, or plan belongs in Git. The Compose key is a local demo default only. Azure reads its worker key from Key Vault through a user-assigned managed identity.
 

@@ -16,7 +16,7 @@ from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from offloader.tasks import execute
 
@@ -31,13 +31,19 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 WORKER_ID = hashlib.sha256(f"{os.getenv('HOSTNAME', 'local')}:{os.getpid()}".encode()).hexdigest()[:12]
 BUILD_SHA = os.getenv("BUILD_SHA", "development")
 API_KEY = os.getenv("CLOUD_API_KEY", "local-demo-key")
+CLOUD_WORKERS = max(1, int(os.getenv("CLOUD_WORKERS", "2")))
 TASKS = Counter("cloud_tasks_total", "Cloud tasks", ["outcome"])
 INSPECTIONS = Counter("cloud_inspections_total", "Surface inspections by verdict", ["verdict"])
 DEFECTS = Counter("cloud_defects_detected_total", "Surface anomalies detected by cloud workers")
 COMPLETION = Histogram("cloud_compute_seconds", "Cloud compute time", buckets=(.01, .05, .1, .25, .5, 1, 2, 5, 10))
 ERRORS = Counter("cloud_errors_total", "Cloud service errors", ["kind"])
+WORKERS_IN_USE = Gauge("cloud_worker_slots_in_use", "Cloud inspection worker slots currently processing work")
+WORKER_CAPACITY = Gauge("cloud_worker_slots_capacity", "Configured cloud inspection worker slots")
+QUEUED_TASKS = Gauge("cloud_queued_tasks", "Cloud inspection tasks waiting for a worker slot")
 _first_lock = threading.Lock()
 _first_request = True
+_active_jobs = 0
+_queued_jobs = 0
 
 
 class ComputeRequest(BaseModel):
@@ -59,7 +65,9 @@ class ComputeRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.pool = ProcessPoolExecutor(max_workers=int(os.getenv("CLOUD_WORKERS", "2")))
+    WORKER_CAPACITY.set(CLOUD_WORKERS)
+    app.state.pool = ProcessPoolExecutor(max_workers=CLOUD_WORKERS)
+    app.state.semaphore = asyncio.Semaphore(CLOUD_WORKERS)
     yield
     app.state.pool.shutdown(wait=True, cancel_futures=True)
 
@@ -94,6 +102,16 @@ def ready():
     return {"status": "ready", "build_sha": BUILD_SHA}
 
 
+@app.get("/status")
+def worker_status(x_api_key: str | None = Header(default=None)):
+    require_key(x_api_key)
+    in_use = min(_active_jobs, CLOUD_WORKERS)
+    return {"available": True, "active_workers": in_use, "queued_tasks": _queued_jobs,
+            "worker_capacity": CLOUD_WORKERS,
+            "utilization_percent": round(100 * in_use / CLOUD_WORKERS, 1),
+            "replica": WORKER_ID}
+
+
 @app.get("/version")
 def version():
     return {"service": "cloud-worker", "build_sha": BUILD_SHA, "replica": WORKER_ID}
@@ -110,11 +128,30 @@ def probe(byte_count: int = 4096, x_api_key: str | None = Header(default=None)):
 @app.post("/compute")
 async def compute_task(payload: ComputeRequest, request: Request,
                        x_api_key: str | None = Header(default=None)):
-    global _first_request
+    global _first_request, _active_jobs, _queued_jobs
     require_key(x_api_key)
     try:
         started = time.perf_counter()
-        result = await asyncio.get_running_loop().run_in_executor(request.app.state.pool, execute, payload.model_dump())
+        waiting_for_slot = True
+        _queued_jobs += 1
+        QUEUED_TASKS.set(_queued_jobs)
+        try:
+            async with request.app.state.semaphore:
+                _queued_jobs -= 1
+                QUEUED_TASKS.set(_queued_jobs)
+                waiting_for_slot = False
+                _active_jobs += 1
+                WORKERS_IN_USE.set(min(_active_jobs, CLOUD_WORKERS))
+                try:
+                    result = await asyncio.get_running_loop().run_in_executor(
+                        request.app.state.pool, execute, payload.model_dump())
+                finally:
+                    _active_jobs -= 1
+                    WORKERS_IN_USE.set(_active_jobs)
+        finally:
+            if waiting_for_slot:
+                _queued_jobs -= 1
+                QUEUED_TASKS.set(_queued_jobs)
         elapsed = time.perf_counter() - started
         with _first_lock:
             cold_start = _first_request

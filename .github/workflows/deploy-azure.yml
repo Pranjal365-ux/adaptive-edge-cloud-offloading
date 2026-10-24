@@ -1,0 +1,91 @@
+name: Deploy cloud worker to Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Immutable GHCR image tag, for example sha-<full 40-character commit SHA>
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-production-cloud-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: azure-production
+    steps:
+      - name: Validate deployment inputs
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          AZURE_CLOUD_APP_NAME: ${{ vars.AZURE_CLOUD_APP_NAME }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_TAG" =~ ^sha-[0-9a-f]{40}$ ]] || { echo "Use a full immutable sha-<40-character commit> image tag."; exit 1; }
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZURE_CLOUD_APP_NAME; do
+            [[ -n "${!name}" ]] || { echo "Missing azure-production environment variable: $name"; exit 1; }
+          done
+
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy immutable image to Container Apps
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          IMAGE_OWNER: ${{ github.repository_owner }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ vars.AZURE_CLOUD_APP_NAME }}
+        run: |
+          set -euo pipefail
+          owner="${IMAGE_OWNER,,}"
+          image="ghcr.io/${owner}/offloadops-cloud:${IMAGE_TAG}"
+          az containerapp update \
+            --name "$APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$image" \
+            --output none
+
+          revision="$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query properties.latestRevisionName --output tsv)"
+          [[ -n "$revision" ]] || { echo "Azure did not report a latest revision."; exit 1; }
+          for attempt in $(seq 1 30); do
+            state="$(az containerapp revision show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+              --revision "$revision" --query properties.runningState --output tsv)"
+            if [[ "$state" == "Running" ]]; then
+              echo "Revision $revision is running."
+              break
+            fi
+            if [[ "$state" == "Failed" || "$state" == "Degraded" ]]; then
+              echo "Revision $revision entered state $state."
+              exit 1
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              echo "Revision $revision did not become ready in time (last state: $state)."
+              exit 1
+            fi
+            sleep 10
+          done
+
+          fqdn="$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn --output tsv)"
+          [[ -n "$fqdn" ]] || { echo "Container App has no external ingress FQDN."; exit 1; }
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-connrefused \
+            "https://${fqdn}/ready"
