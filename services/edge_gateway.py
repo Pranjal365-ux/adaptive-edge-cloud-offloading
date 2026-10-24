@@ -11,12 +11,13 @@ import uuid
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
+from typing import Literal
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from offloader.costs import CostModel
 from offloader.workload import compute
@@ -70,15 +71,36 @@ _scenario_task: asyncio.Task | None = None
 
 class ComputeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    iterations: int = Field(ge=1, le=2_000_000)
-    data: str = Field(max_length=200_000)
+    task_id: str = Field(default_factory=lambda: f"JOB-{uuid.uuid4().hex[:10].upper()}", min_length=1, max_length=80)
+    task_type: Literal["synthetic_telemetry_digest"] = "synthetic_telemetry_digest"
+    source: str = Field(default="sensor-gateway-07", min_length=1, max_length=100)
+    priority: Literal["low", "normal", "high"] = "normal"
+    workload_profile: Literal["quick", "balanced", "heavy"] = "balanced"
+    record_count: int = Field(default=1, ge=1, le=10_000)
+    iterations: int | None = Field(default=None, ge=1, le=2_000_000)
+    data: str | dict | list = Field(default="{}")
+
+    @field_validator("data", mode="before")
+    @classmethod
+    def encode_data(cls, value):
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return value
 
     @field_validator("data")
     @classmethod
     def validate_utf8_size(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("data must be text, a JSON object, or a JSON array")
         if len(value.encode("utf-8")) > 200_000:
             raise ValueError("data must be at most 200000 UTF-8 bytes")
         return value
+
+    @model_validator(mode="after")
+    def resolve_profile(self):
+        if self.iterations is None:
+            self.iterations = {"quick": 50_000, "balanced": 300_000, "heavy": 900_000}[self.workload_profile]
+        return self
 
 
 class PolicyUpdate(BaseModel):
@@ -192,7 +214,7 @@ async def run_edge(payload: ComputeRequest, request_id: str):
     try:
         async with app.state.semaphore:
             result = await asyncio.get_running_loop().run_in_executor(
-                app.state.pool, compute, payload.model_dump())
+                app.state.pool, compute, {"iterations": payload.iterations, "data": payload.data})
         learn_service_rate("edge", payload.iterations, result["compute_ms"])
         return result
     finally:
@@ -341,7 +363,7 @@ async def put_scenario(update: ScenarioUpdate):
 async def submit_task(payload: ComputeRequest, request: Request):
     global _active_cloud
     start = time.perf_counter()
-    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))[:128]
+    request_id = request.headers.get("x-request-id", payload.task_id)[:128]
     destination, decision = choose_destination(payload, _active_local)
     fallback = False
     if destination == "cloud" and await cloud_open():
@@ -354,7 +376,8 @@ async def submit_task(payload: ComputeRequest, request: Request):
         _cloud_inflight_metric.set(_active_cloud)
         try:
             response = await app.state.client.post(f"{CLOUD_URL}/compute",
-                json=payload.model_dump(), headers={"X-API-Key": CLOUD_API_KEY, "X-Request-ID": request_id})
+                json={"iterations": payload.iterations, "data": payload.data},
+                headers={"X-API-Key": CLOUD_API_KEY, "X-Request-ID": request_id})
             response.raise_for_status()
             result = response.json()
             learn_service_rate("cloud", payload.iterations, result.get("compute_ms", 0))
@@ -375,12 +398,16 @@ async def submit_task(payload: ComputeRequest, request: Request):
         TASKS.labels(policy=decision["policy"], destination="edge").inc()
     elapsed = time.perf_counter() - start
     COMPLETION.labels(policy=decision["policy"]).observe(elapsed)
-    event = {"request_id": request_id, "policy": decision["policy"],
+    event = {"request_id": request_id, "task_id": payload.task_id, "task_type": payload.task_type,
+        "source": payload.source, "priority": payload.priority, "record_count": payload.record_count,
+        "workload_profile": payload.workload_profile, "policy": decision["policy"],
         "destination": destination, "reason": decision["reason"],
         "completion_ms": round(elapsed * 1000, 3), "fallback": fallback,
         "digest": result["digest"]}
     add_event(event)
-    return {**result, **decision, "destination": destination, "fallback": fallback,
+    return {**result, **decision, "task_id": payload.task_id, "task_type": payload.task_type,
+        "source": payload.source, "priority": payload.priority, "record_count": payload.record_count,
+        "workload_profile": payload.workload_profile, "destination": destination, "fallback": fallback,
         "completion_ms": round(elapsed * 1000, 3), "request_id": request_id}
 
 

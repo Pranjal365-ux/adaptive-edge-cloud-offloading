@@ -111,10 +111,10 @@
     .pane-tag { padding: 3px 7px; border: 1px solid #314457; border-radius: 6px; color: #92a7bc; font-size: 9px; letter-spacing: .04em; }
     .pane-tag.output { color: #8be0bd; border-color: #28513f; background: #12251e; }
     .field-label { display: block; margin: 8px 0 5px; color: #a9b6c4; font-size: 10px; font-weight: 650; }
-    .task-data { display: block; width: 100%; min-height: 66px; resize: vertical; padding: 9px 10px; border: 1px solid #304153; border-radius: 8px; color: #e5eef7; background: #111b26; font: 12px/1.45 ui-monospace, Consolas, monospace; }
-    .task-data:focus, .iteration-input:focus { outline: 2px solid #4e9eea88; border-color: #4e9eea; }
-    .input-options { display: flex; align-items: end; justify-content: space-between; gap: 10px; }
-    .iteration-input { width: 142px; min-height: 34px; padding: 6px 8px; border: 1px solid #304153; border-radius: 8px; color: var(--text); background: #111b26; font: 12px ui-monospace, Consolas, monospace; }
+    .task-data { display: block; width: 100%; min-height: 150px; resize: vertical; padding: 9px 10px; border: 1px solid #304153; border-radius: 8px; color: #e5eef7; background: #111b26; font: 12px/1.45 ui-monospace, Consolas, monospace; }
+    .task-data:focus, .iteration-input:focus, .task-select:focus { outline: 2px solid #4e9eea88; border-color: #4e9eea; }
+    .input-options { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: end; gap: 8px; }
+    .iteration-input, .task-select { width: 100%; min-height: 34px; padding: 6px 8px; border: 1px solid #304153; border-radius: 8px; color: var(--text); background: #111b26; font: 12px ui-monospace, Consolas, monospace; }
     .byte-count { padding-bottom: 8px; color: #788a9a; font: 10px ui-monospace, Consolas, monospace; text-align: right; }
     .json-preview { max-height: 94px; overflow: auto; margin: 10px 0 0; padding: 8px 9px; border: 1px solid #202e3c; border-radius: 7px; color: #86c8ff; background: #0a1017; font: 10px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     .output-placeholder { display: grid; min-height: 194px; place-items: center; padding: 15px; color: #748393; text-align: center; font-size: 11px; }
@@ -277,13 +277,24 @@
           <div class="task-workbench">
             <section class="task-pane" aria-labelledby="input-title">
               <div class="task-pane-head"><div id="input-title" class="task-pane-title">Task input</div><span class="pane-tag">JSON · editable</span></div>
-              <label class="field-label" for="task-data">Data sent to the worker</label>
-              <textarea id="task-data" class="task-data" maxlength="200000" spellcheck="false">offloadops-demo</textarea>
+              <label class="field-label" for="task-data">Synthetic telemetry batch · editable JSON</label>
+              <textarea id="task-data" class="task-data" maxlength="200000" spellcheck="false">{
+  "batch_id": "BATCH-1042",
+  "site": "north-roof",
+  "records": [
+    {"sensor": "temp-01", "metric": "temperature_c", "value": 21.8},
+    {"sensor": "humid-02", "metric": "humidity_pct", "value": 43.2},
+    {"sensor": "wind-01", "metric": "wind_mps", "value": 3.7}
+  ]
+}</textarea>
               <div class="input-options">
-                <div><label class="field-label" for="iterations">SHA-256 iterations</label><input id="iterations" class="iteration-input" type="number" min="1" max="2000000" step="10000" value="300000"></div>
-                <div id="byte-count" class="byte-count">15 UTF-8 bytes</div>
+                <div><label class="field-label" for="task-source">Source</label><input id="task-source" class="iteration-input" value="sensor-gateway-07" maxlength="100"></div>
+                <div><label class="field-label" for="task-priority">Priority</label><select id="task-priority" class="task-select"><option>low</option><option selected>normal</option><option>high</option></select></div>
+                <div><label class="field-label" for="workload-profile">Workload profile</label><select id="workload-profile" class="task-select"><option value="quick">Quick</option><option value="balanced" selected>Balanced</option><option value="heavy">Heavy</option></select></div>
               </div>
+              <div id="byte-count" class="byte-count">0 bytes · 0 records</div>
               <pre id="payload-preview" class="json-preview" aria-label="Exact JSON payload preview"></pre>
+              <p class="card-note">Synthetic demo input. The worker hashes this JSON with a repeatable compute profile; it does not aggregate production telemetry.</p>
             </section>
             <section class="task-pane" aria-labelledby="output-title" aria-live="polite">
               <div class="task-pane-head"><div id="output-title" class="task-pane-title">Task output</div><span id="output-tag" class="pane-tag output">Ready</span></div>
@@ -294,7 +305,7 @@
                   <div class="result-metric"><span>End-to-end</span><strong id="result-total">—</strong></div>
                   <div class="result-metric"><span>Worker compute</span><strong id="result-compute">—</strong></div>
                   <div class="result-metric"><span>Input size</span><strong id="result-bytes">—</strong></div>
-                  <div class="result-metric"><span>Iterations</span><strong id="result-iterations">—</strong></div>
+                  <div class="result-metric"><span>Job</span><strong id="result-job">—</strong></div>
                 </div>
                 <div class="digest-label">SHA-256 output digest</div>
                 <code id="result-digest" class="digest-value"></code>
@@ -353,6 +364,7 @@
       let metric = 'rtt';
       let latestDestination = null;
       let submittedPayloadJson = null;
+      let previewTaskId = null;
       let toastTimer;
       const escapeHtml = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
@@ -368,24 +380,36 @@
       function setFeedback(message) { $('feedback').textContent = message; }
 
       function payloadFromForm() {
-        const iterations = Number($('iterations').value);
-        const data = $('task-data').value;
-        const bytes = new TextEncoder().encode(data).length;
-        $('byte-count').textContent = `${bytes.toLocaleString()} UTF-8 bytes`;
-        if (!Number.isInteger(iterations) || iterations < 1 || iterations > 2_000_000) {
-          throw new Error('Iterations must be a whole number between 1 and 2,000,000.');
-        }
+        let data;
+        try { data = JSON.parse($('task-data').value); }
+        catch { throw new Error('Task input must be valid JSON. Edit the sample batch or paste a JSON object/array.'); }
+        if (!data || typeof data !== 'object') throw new Error('Task input must be a JSON object or array.');
+        const dataText = JSON.stringify(data);
+        const bytes = new TextEncoder().encode(dataText).length;
         if (bytes > 200_000) throw new Error('Task data must be no more than 200,000 UTF-8 bytes.');
-        return {iterations, data};
+        const source = $('task-source').value.trim();
+        if (!source) throw new Error('Enter a source name for this job.');
+        const profile = $('workload-profile').value;
+        const count = Math.max(1, Array.isArray(data) ? data.length : (Array.isArray(data.records) ? data.records.length : 1));
+        $('byte-count').textContent = `${bytes.toLocaleString()} compact JSON bytes · ${count.toLocaleString()} records`;
+        previewTaskId ||= `JOB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+        return {task_id: previewTaskId, task_type: 'synthetic_telemetry_digest', source,
+          priority: $('task-priority').value, workload_profile: profile, record_count: count, data};
       }
 
       function updatePayloadPreview() {
-        const iterations = Number($('iterations').value);
-        const payload = {iterations: Number.isFinite(iterations) ? iterations : $('iterations').value, data: $('task-data').value};
-        const json = JSON.stringify(payload, null, 2);
-        $('payload-preview').textContent = json;
-        const bytes = new TextEncoder().encode(payload.data).length;
-        $('byte-count').textContent = `${bytes.toLocaleString()} UTF-8 bytes`;
+        let payload;
+        try {
+          payload = payloadFromForm();
+          $('payload-preview').textContent = JSON.stringify(payload, null, 2);
+          $('payload-preview').style.color = '#86c8ff';
+        } catch (error) {
+          $('payload-preview').textContent = error.message;
+          $('payload-preview').style.color = '#f0a0a0';
+          const bytes = new TextEncoder().encode($('task-data').value).length;
+          $('byte-count').textContent = `${bytes.toLocaleString()} typed bytes · invalid JSON`;
+        }
+        const json = $('payload-preview').textContent;
         if (submittedPayloadJson && json !== submittedPayloadJson) {
           $('output-tag').textContent = 'Input changed';
           $('result-reason').textContent = 'The input changed after this result. Run the task again to compare the new payload.';
@@ -410,8 +434,8 @@
         $('result-request').textContent = 'waiting for response';
         $('result-total').textContent = 'Running…';
         $('result-compute').textContent = '—';
-        $('result-bytes').textContent = `${new TextEncoder().encode(payload.data).length.toLocaleString()} B`;
-        $('result-iterations').textContent = payload.iterations.toLocaleString();
+        $('result-bytes').textContent = `${new TextEncoder().encode(JSON.stringify(payload.data)).length.toLocaleString()} B`;
+        $('result-job').textContent = payload.task_id;
         $('result-digest').textContent = 'Waiting for worker output…';
         $('result-reason').textContent = 'The edge gateway is selecting a destination and executing the workload.';
         $('response-json').textContent = 'Waiting for response…';
@@ -423,11 +447,11 @@
         const badge = $('destination-badge');
         badge.className = `destination-badge ${result.fallback ? 'fallback' : destination}`;
         badge.textContent = result.fallback ? 'EDGE FALLBACK' : `${destination.toUpperCase()} WORKER`;
-        $('result-request').textContent = `ID ${String(result.request_id || '—').slice(0, 18)}`;
+        $('result-request').textContent = `${payload.source} · ${String(result.task_id || result.request_id || '—')}`;
         $('result-total').textContent = `${Number(result.completion_ms || 0).toFixed(1)} ms`;
         $('result-compute').textContent = `${Number(result.compute_ms || 0).toFixed(1)} ms`;
-        $('result-bytes').textContent = `${Number(result.input_bytes ?? new TextEncoder().encode(payload.data).length).toLocaleString()} B`;
-        $('result-iterations').textContent = Number(result.iterations ?? payload.iterations).toLocaleString();
+        $('result-bytes').textContent = `${Number(result.input_bytes ?? new TextEncoder().encode(JSON.stringify(payload.data)).length).toLocaleString()} B`;
+        $('result-job').textContent = `${payload.record_count} records · ${payload.workload_profile}`;
         $('result-digest').textContent = result.digest || 'No digest returned';
         $('result-reason').textContent = result.reason || (result.fallback ? 'The cloud request failed and the edge completed the task.' : `The active ${String(result.policy || 'routing')} policy selected ${destination}.`);
         $('response-json').textContent = JSON.stringify(result, null, 2);
@@ -441,7 +465,7 @@
         $('result-request').textContent = 'request failed';
         $('result-total').textContent = '—'; $('result-compute').textContent = '—';
         $('result-bytes').textContent = `${new TextEncoder().encode($('task-data').value).length.toLocaleString()} B`;
-        $('result-iterations').textContent = $('iterations').value || '—';
+        $('result-job').textContent = '—';
         $('result-digest').textContent = 'No output was returned.';
         $('result-reason').textContent = error.message;
         $('response-json').textContent = JSON.stringify({error: error.message}, null, 2);
@@ -469,7 +493,7 @@
         $('events').innerHTML = rows.map(event => {
           const destination = String(event.destination || 'edge').toLowerCase();
           const label = destination === 'cloud' ? 'CLOUD' : 'EDGE';
-          return `<div class="event-row ${destination === 'cloud' ? 'cloud' : ''}"><span class="event-marker"></span><div class="event-main"><div class="event-destination">${label}${event.fallback ? ' · FALLBACK' : ''}</div><div class="event-reason">${escapeHtml(event.reason || 'Policy decision')}</div></div><span class="event-time">${Number(event.completion_ms || 0).toFixed(1)} ms</span></div>`;
+          return `<div class="event-row ${destination === 'cloud' ? 'cloud' : ''}"><span class="event-marker"></span><div class="event-main"><div class="event-destination">${label}${event.fallback ? ' · FALLBACK' : ''} · ${escapeHtml(event.task_id || event.request_id || 'JOB')}</div><div class="event-reason">${escapeHtml(event.source || 'source')} · ${Number(event.record_count || 1)} records · ${escapeHtml(event.reason || 'Policy decision')}</div></div><span class="event-time">${Number(event.completion_ms || 0).toFixed(1)} ms</span></div>`;
         }).join('');
         const newest = rows[0];
         if (newest) updateRoute(newest.destination, newest.fallback, '');
@@ -574,7 +598,9 @@
       }
 
       async function api(path, method, body) {
-        const response = await fetch(path, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+        const headers = {'Content-Type': 'application/json'};
+        if (body?.task_id) headers['X-Request-ID'] = body.task_id;
+        const response = await fetch(path, {method, headers, body: JSON.stringify(body)});
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
         return payload;
@@ -598,15 +624,16 @@
           const result = await api('/tasks', 'POST', payload);
           showTaskResult(result, payload);
           updateRoute(result.destination, result.fallback, result.reason);
-          setFeedback(`${result.destination === 'cloud' ? 'Cloud' : 'Edge'} completed the task in ${Number(result.completion_ms).toFixed(1)} ms.`);
+          setFeedback(`Job ${result.task_id} from ${result.source} was routed to ${result.destination} and completed in ${Number(result.completion_ms).toFixed(1)} ms.`);
           await refresh();
         } catch (error) { showTaskError(error); setFeedback(`Task failed: ${error.message}`); toast(error.message, true); }
         finally { button.disabled = false; button.textContent = 'Run task →'; }
       });
 
-      $('task-data').addEventListener('input', updatePayloadPreview);
-      $('iterations').addEventListener('input', updatePayloadPreview);
-      $('iterations').addEventListener('change', updatePayloadPreview);
+      ['task-data', 'task-source', 'task-priority', 'workload-profile'].forEach(id => {
+        $(id).addEventListener('input', () => { previewTaskId = null; updatePayloadPreview(); });
+        $(id).addEventListener('change', () => { previewTaskId = null; updatePayloadPreview(); });
+      });
       updatePayloadPreview();
 
       document.querySelectorAll('[data-scenario]').forEach(button => button.addEventListener('click', async () => {
