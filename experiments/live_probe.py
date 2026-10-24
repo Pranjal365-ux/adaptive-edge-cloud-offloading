@@ -3,7 +3,7 @@ import argparse
 import os
 import time
 from pathlib import Path
-from live_experiment import compute, cloud_compute, write_csv, utc
+from .live_experiment import compute, cloud_compute, write_csv, utc
 
 def run_probe(url, key, payload):
     t0 = time.perf_counter()

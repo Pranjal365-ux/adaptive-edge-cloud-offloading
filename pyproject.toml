@@ -23,6 +23,7 @@ services = [
   "azure-monitor-opentelemetry==1.8.11",
   "fastapi==0.158.1",
   "httpx==0.28.1",
+  "Pillow==13.0.0",
   "prometheus-client==0.26.0",
   "pydantic==2.14.1",
   "uvicorn==0.54.0",
@@ -37,7 +38,7 @@ dashboard = [
 include = ["offloader*"]
 
 [tool.pytest.ini_options]
-testpaths = ["."]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
 
@@ -53,7 +54,7 @@ fail_under = 80
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-exclude = [".venv", "terraform/.terraform", "temp_validation"]
+exclude = [".venv", "terraform/.terraform"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

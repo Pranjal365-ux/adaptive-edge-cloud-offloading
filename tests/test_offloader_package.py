@@ -6,7 +6,6 @@ from unittest.mock import patch
 from offloader.costs import CostModel
 from offloader.policies import AdaptiveOracle, DecisionContext, EdgeOnly, CloudOnly, Threshold
 from offloader.stats import bootstrap_mean_ci, mean_std, nearest_rank, paired_mean_ci
-from offloader.workload import compute as shared_compute
 from offloading import Scenario, Simulation, Task
 
 
@@ -64,12 +63,6 @@ class PackageTests(unittest.TestCase):
         at_end = first.network_at(30)
         self.assertEqual(at_end, second.network_at(30))
         self.assertNotEqual(at_start, at_end)
-
-    def test_shared_workload_matches_legacy_azure_function(self):
-        from azure_function.workload import compute as legacy_compute
-
-        payload = {"iterations": 12, "data": "same task λ"}
-        self.assertEqual(shared_compute(payload)["digest"], legacy_compute(payload)["digest"])
 
     def test_observed_adaptive_ignores_unmeasured_current_link(self):
         task = [Task(0, 0, 1500, .01, .01)]

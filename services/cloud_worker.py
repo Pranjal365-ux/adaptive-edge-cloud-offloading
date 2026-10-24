@@ -12,12 +12,13 @@ import time
 import uuid
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
-from offloader.workload import compute
+from offloader.tasks import execute
 
 LOG = logging.getLogger("offloadops.cloud")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -31,6 +32,8 @@ WORKER_ID = hashlib.sha256(f"{os.getenv('HOSTNAME', 'local')}:{os.getpid()}".enc
 BUILD_SHA = os.getenv("BUILD_SHA", "development")
 API_KEY = os.getenv("CLOUD_API_KEY", "local-demo-key")
 TASKS = Counter("cloud_tasks_total", "Cloud tasks", ["outcome"])
+INSPECTIONS = Counter("cloud_inspections_total", "Surface inspections by verdict", ["verdict"])
+DEFECTS = Counter("cloud_defects_detected_total", "Surface anomalies detected by cloud workers")
 COMPLETION = Histogram("cloud_compute_seconds", "Cloud compute time", buckets=(.01, .05, .1, .25, .5, 1, 2, 5, 10))
 ERRORS = Counter("cloud_errors_total", "Cloud service errors", ["kind"])
 _first_lock = threading.Lock()
@@ -39,15 +42,19 @@ _first_request = True
 
 class ComputeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    iterations: int = Field(ge=1, le=2_000_000)
-    data: str = Field(max_length=200_000)
+    task_type: Literal["surface_defect_inspection"] = "surface_defect_inspection"
+    image_base64: str | None = Field(default=None, max_length=4_000_000)
+    image_width: int | None = Field(default=None, ge=64, le=2048)
+    image_height: int | None = Field(default=None, ge=64, le=2048)
+    sensitivity: Literal["low", "normal", "high"] = "normal"
 
-    @field_validator("data")
-    @classmethod
-    def validate_utf8_size(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 200_000:
-            raise ValueError("data must be at most 200000 UTF-8 bytes")
-        return value
+    @model_validator(mode="after")
+    def validate_task(self):
+        if not self.image_base64 or self.image_width is None or self.image_height is None:
+            raise ValueError("image_base64, image_width, and image_height are required for inspection")
+        if self.image_width * self.image_height > 2_400_000:
+            raise ValueError("image is too large")
+        return self
 
 
 @asynccontextmanager
@@ -107,7 +114,7 @@ async def compute_task(payload: ComputeRequest, request: Request,
     require_key(x_api_key)
     try:
         started = time.perf_counter()
-        result = await asyncio.get_running_loop().run_in_executor(request.app.state.pool, compute, payload.model_dump())
+        result = await asyncio.get_running_loop().run_in_executor(request.app.state.pool, execute, payload.model_dump())
         elapsed = time.perf_counter() - started
         with _first_lock:
             cold_start = _first_request
@@ -116,12 +123,23 @@ async def compute_task(payload: ComputeRequest, request: Request,
                        "cold_start_signal": "first successful task handled by this worker process; not platform launch time",
                        "request_id": request.headers.get("x-request-id", "")})
         TASKS.labels(outcome="success").inc()
+        if result.get("verdict"):
+            INSPECTIONS.labels(verdict=result["verdict"]).inc()
+            DEFECTS.inc(result.get("defect_count", 0))
         COMPLETION.observe(elapsed)
         return result
     except ValueError as exc:
         ERRORS.labels(kind="validation").inc()
         TASKS.labels(outcome="rejected").inc()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.middleware("http")
+async def request_size_limit(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > 4_500_000:
+        return Response(status_code=413, content="request too large")
+    return await call_next(request)
 
 
 @app.get("/metrics")

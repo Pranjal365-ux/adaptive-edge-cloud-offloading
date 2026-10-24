@@ -111,12 +111,17 @@
     .pane-tag { padding: 3px 7px; border: 1px solid #314457; border-radius: 6px; color: #92a7bc; font-size: 9px; letter-spacing: .04em; }
     .pane-tag.output { color: #8be0bd; border-color: #28513f; background: #12251e; }
     .field-label { display: block; margin: 8px 0 5px; color: #a9b6c4; font-size: 10px; font-weight: 650; }
-    .task-data { display: block; width: 100%; min-height: 150px; resize: vertical; padding: 9px 10px; border: 1px solid #304153; border-radius: 8px; color: #e5eef7; background: #111b26; font: 12px/1.45 ui-monospace, Consolas, monospace; }
-    .task-data:focus, .iteration-input:focus, .task-select:focus { outline: 2px solid #4e9eea88; border-color: #4e9eea; }
-    .input-options { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: end; gap: 8px; }
-    .iteration-input, .task-select { width: 100%; min-height: 34px; padding: 6px 8px; border: 1px solid #304153; border-radius: 8px; color: var(--text); background: #111b26; font: 12px ui-monospace, Consolas, monospace; }
+    .job-input:focus, .task-select:focus { outline: 2px solid #4e9eea88; border-color: #4e9eea; }
+    .input-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 8px; }
+    .job-input, .task-select { width: 100%; min-height: 34px; padding: 6px 8px; border: 1px solid #304153; border-radius: 8px; color: var(--text); background: #111b26; font: 12px ui-monospace, Consolas, monospace; }
     .byte-count { padding-bottom: 8px; color: #788a9a; font: 10px ui-monospace, Consolas, monospace; text-align: right; }
     .json-preview { max-height: 94px; overflow: auto; margin: 10px 0 0; padding: 8px 9px; border: 1px solid #202e3c; border-radius: 7px; color: #86c8ff; background: #0a1017; font: 10px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .inspection-preview { display: block; width: 100%; max-height: 230px; object-fit: contain; margin-top: 10px; border: 1px solid #293849; border-radius: 9px; background: #080d12; }
+    .image-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .image-meta { margin-left: auto; color: #8092a3; font: 10px ui-monospace, Consolas, monospace; }
+    .result-image { display: block; width: 100%; max-height: 280px; object-fit: contain; margin: 12px 0; border: 1px solid #293849; border-radius: 9px; background: #080d12; }
+    .defect-list { display: grid; gap: 5px; max-height: 94px; overflow: auto; color: #b8c7d6; font: 10px/1.5 ui-monospace, Consolas, monospace; }
+    .job-envelope { max-height: 108px; }
     .output-placeholder { display: grid; min-height: 194px; place-items: center; padding: 15px; color: #748393; text-align: center; font-size: 11px; }
     .output-placeholder svg { display: block; width: 34px; height: 34px; margin: 0 auto 9px; color: #51667a; }
     .result-state { display: none; }
@@ -132,8 +137,6 @@
     .result-metric { min-width: 0; padding: 8px; border: 1px solid #243242; border-radius: 8px; background: #111a24; }
     .result-metric span { display: block; color: #7f91a1; font-size: 9px; }
     .result-metric strong { display: block; margin-top: 2px; color: #e5f1fc; font: 600 13px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
-    .digest-label { margin-top: 10px; color: #7f91a1; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
-    .digest-value { display: block; margin-top: 4px; padding: 7px 8px; border: 1px solid #243242; border-radius: 7px; color: #80d6c1; background: #0a1017; font: 9px/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
     .decision-note { margin: 9px 0 0; color: #9aabba; font-size: 10px; line-height: 1.45; }
     .raw-result { margin-top: 9px; color: #8393a3; font-size: 10px; }
     .raw-result summary { cursor: pointer; }
@@ -186,6 +189,7 @@
     @media (max-width: 500px) {
       .side-stack { grid-template-columns: 1fr; }
       .task-workbench { grid-template-columns: 1fr; }
+      .input-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .output-placeholder { min-height: 110px; }
       .card-pad, .control-card, .events-card { padding: 16px; }
       .chart-card { min-height: 345px; }
@@ -273,48 +277,47 @@
       <section class="demo-grid" aria-label="Demo controls and recent decisions">
         <article class="card control-card">
           <div class="step-label">01 · Generate work</div>
-          <h3 class="control-title">Inspect the exact request and its result</h3>
+          <h3 class="control-title">Inspect a production-line part image</h3>
           <div class="task-workbench">
             <section class="task-pane" aria-labelledby="input-title">
-              <div class="task-pane-head"><div id="input-title" class="task-pane-title">Task input</div><span class="pane-tag">JSON · editable</span></div>
-              <label class="field-label" for="task-data">Synthetic telemetry batch · editable JSON</label>
-              <textarea id="task-data" class="task-data" maxlength="200000" spellcheck="false">{
-  "batch_id": "BATCH-1042",
-  "site": "north-roof",
-  "records": [
-    {"sensor": "temp-01", "metric": "temperature_c", "value": 21.8},
-    {"sensor": "humid-02", "metric": "humidity_pct", "value": 43.2},
-    {"sensor": "wind-01", "metric": "wind_mps", "value": 3.7}
-  ]
-}</textarea>
-              <div class="input-options">
-                <div><label class="field-label" for="task-source">Source</label><input id="task-source" class="iteration-input" value="sensor-gateway-07" maxlength="100"></div>
-                <div><label class="field-label" for="task-priority">Priority</label><select id="task-priority" class="task-select"><option>low</option><option selected>normal</option><option>high</option></select></div>
-                <div><label class="field-label" for="workload-profile">Workload profile</label><select id="workload-profile" class="task-select"><option value="quick">Quick</option><option value="balanced" selected>Balanced</option><option value="heavy">Heavy</option></select></div>
+              <div class="task-pane-head"><div id="input-title" class="task-pane-title">Task input</div><span class="pane-tag">Image · JPEG / PNG / WebP</span></div>
+              <label class="field-label">Part image for surface inspection</label>
+              <div class="image-actions">
+                <input id="inspection-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+                <button id="choose-image" class="button small" type="button">Choose image</button>
+                <button id="sample-image" class="button small" type="button">Load sample with scratch</button>
+                <span id="image-meta" class="image-meta">Preparing sample…</span>
               </div>
-              <div id="byte-count" class="byte-count">0 bytes · 0 records</div>
-              <pre id="payload-preview" class="json-preview" aria-label="Exact JSON payload preview"></pre>
-              <p class="card-note">Synthetic demo input. The worker hashes this JSON with a repeatable compute profile; it does not aggregate production telemetry.</p>
+              <canvas id="input-image" class="inspection-preview" aria-label="Input part image preview"></canvas>
+              <div class="input-options">
+                <div><label class="field-label" for="task-source">Camera source</label><input id="task-source" class="job-input" value="line-03-camera-01" maxlength="100"></div>
+                <div><label class="field-label" for="task-priority">Priority</label><select id="task-priority" class="task-select"><option>low</option><option selected>normal</option><option>high</option></select></div>
+                <div><label class="field-label" for="workload-profile">Image detail</label><select id="workload-profile" class="task-select"><option value="quick">Quick · 512 px</option><option value="balanced" selected>Standard · 1024 px</option><option value="heavy">High · 1536 px</option></select></div>
+                <div><label class="field-label" for="inspection-sensitivity">Sensitivity</label><select id="inspection-sensitivity" class="task-select"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option></select></div>
+              </div>
+              <div id="byte-count" class="byte-count">Preparing image payload…</div>
+              <pre id="payload-preview" class="json-preview job-envelope" aria-label="Task envelope preview"></pre>
+              <p class="card-note">The worker marks local-contrast anomalies for review. This demo heuristic is not a certified inspection system.</p>
             </section>
             <section class="task-pane" aria-labelledby="output-title" aria-live="polite">
               <div class="task-pane-head"><div id="output-title" class="task-pane-title">Task output</div><span id="output-tag" class="pane-tag output">Ready</span></div>
-              <div id="output-placeholder" class="output-placeholder"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h3M8 16h8"/><path d="m13 12 2 2 4-4"/></svg>Run the task to see the destination,<br>timings, and SHA-256 result here.</div></div>
+              <div id="output-placeholder" class="output-placeholder"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h3M8 16h8"/><path d="m13 12 2 2 4-4"/></svg>Run the inspection to see the route,<br>suspected defects, and annotated image.</div></div>
               <div id="result-state" class="result-state">
                 <div class="result-banner"><span id="destination-badge" class="destination-badge">EDGE</span><span id="result-request" class="result-request"></span></div>
                 <div class="result-metrics">
+                  <div class="result-metric"><span>Inspection</span><strong id="result-verdict">—</strong></div>
+                  <div class="result-metric"><span>Suspected defects</span><strong id="result-defects">—</strong></div>
                   <div class="result-metric"><span>End-to-end</span><strong id="result-total">—</strong></div>
                   <div class="result-metric"><span>Worker compute</span><strong id="result-compute">—</strong></div>
-                  <div class="result-metric"><span>Input size</span><strong id="result-bytes">—</strong></div>
-                  <div class="result-metric"><span>Job</span><strong id="result-job">—</strong></div>
                 </div>
-                <div class="digest-label">SHA-256 output digest</div>
-                <code id="result-digest" class="digest-value"></code>
+                <img id="result-image" class="result-image" alt="Worker annotated image with suspected surface anomalies">
+                <div id="defect-list" class="defect-list"></div>
                 <p id="result-reason" class="decision-note"></p>
                 <details class="raw-result"><summary>View full response JSON</summary><pre id="response-json"></pre></details>
               </div>
             </section>
           </div>
-          <div class="run-task-row"><span class="run-help">The same input can be routed to edge or cloud by the selected policy.</span><button id="send" class="button primary" type="button">Run task →</button></div>
+          <div class="run-task-row"><span class="run-help">The image goes to the worker selected by the active edge/cloud policy.</span><button id="send" class="button primary" type="button">Inspect image →</button></div>
           <div class="step-label" style="margin-top:20px">02 · Change the network</div>
           <h3 class="control-title">Apply a network condition</h3>
           <div class="scenario-list" role="group" aria-label="Network scenarios">
@@ -365,6 +368,11 @@
       let latestDestination = null;
       let submittedPayloadJson = null;
       let previewTaskId = null;
+      let sourceImage = null;
+      let sourceWidth = 0;
+      let sourceHeight = 0;
+      let sourceName = 'sample-part-with-scratch.png';
+      let preparedImageBase64 = '';
       let toastTimer;
       const escapeHtml = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
@@ -379,40 +387,93 @@
 
       function setFeedback(message) { $('feedback').textContent = message; }
 
+      function selectedImageLimit() {
+        return {quick: 512, balanced: 1024, heavy: 1536}[$('workload-profile').value] || 1024;
+      }
+
+      function envelopeFor(payload) {
+        const {image_base64, ...envelope} = payload;
+        envelope.image = {file: sourceName, format: 'JPEG', width: payload.image_width,
+          height: payload.image_height, encoded_bytes: Math.floor(image_base64.length * 3 / 4)};
+        return envelope;
+      }
+
+      function redrawInspectionImage() {
+        if (!sourceImage) return;
+        const limit = selectedImageLimit();
+        const scale = Math.min(1, limit / sourceWidth, limit / sourceHeight);
+        const canvas = $('input-image');
+        canvas.width = Math.max(64, Math.round(sourceWidth * scale));
+        canvas.height = Math.max(64, Math.round(sourceHeight * scale));
+        canvas.getContext('2d', {alpha: false}).drawImage(sourceImage, 0, 0, canvas.width, canvas.height);
+        preparedImageBase64 = canvas.toDataURL('image/jpeg', 0.86).split(',')[1];
+        $('image-meta').textContent = sourceName + ' · ' + canvas.width + ' × ' + canvas.height;
+        previewTaskId = null;
+        updatePayloadPreview();
+      }
+
+      function makeSamplePart() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1200; canvas.height = 800;
+        const ctx = canvas.getContext('2d');
+        const surface = ctx.createLinearGradient(0, 0, 1200, 800);
+        surface.addColorStop(0, '#c4c9ce'); surface.addColorStop(1, '#b9bfc5');
+        ctx.fillStyle = surface; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#adb4bb'; ctx.lineWidth = 2; ctx.strokeRect(34, 34, 1132, 732);
+        ctx.strokeStyle = '#353b40'; ctx.lineCap = 'round'; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(465, 286); ctx.lineTo(650, 333); ctx.lineTo(779, 382); ctx.stroke();
+        ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(854, 542); ctx.lineTo(917, 523); ctx.lineTo(959, 532); ctx.stroke();
+        ctx.fillStyle = '#555b61'; ctx.beginPath(); ctx.ellipse(285, 556, 7, 4, -.2, 0, Math.PI * 2); ctx.fill();
+        return canvas;
+      }
+
+      function loadSampleImage() {
+        sourceImage = makeSamplePart(); sourceWidth = 1200; sourceHeight = 800;
+        sourceName = 'sample-part-with-scratches.png';
+        redrawInspectionImage();
+      }
+
+      async function loadInspectionFile(file) {
+        if (!file) return;
+        if (file.size > 15_000_000) throw new Error('Choose an image smaller than 15 MB; it will be resized before upload.');
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+          throw new Error('Choose a JPEG, PNG, or WebP image.');
+        }
+        const bitmap = await createImageBitmap(file);
+        if (sourceImage && sourceImage.close) sourceImage.close();
+        sourceImage = bitmap; sourceWidth = bitmap.width; sourceHeight = bitmap.height; sourceName = file.name;
+        redrawInspectionImage();
+      }
+
       function payloadFromForm() {
-        let data;
-        try { data = JSON.parse($('task-data').value); }
-        catch { throw new Error('Task input must be valid JSON. Edit the sample batch or paste a JSON object/array.'); }
-        if (!data || typeof data !== 'object') throw new Error('Task input must be a JSON object or array.');
-        const dataText = JSON.stringify(data);
-        const bytes = new TextEncoder().encode(dataText).length;
-        if (bytes > 200_000) throw new Error('Task data must be no more than 200,000 UTF-8 bytes.');
+        if (!preparedImageBase64) throw new Error('Choose an image or load the sample part first.');
         const source = $('task-source').value.trim();
-        if (!source) throw new Error('Enter a source name for this job.');
-        const profile = $('workload-profile').value;
-        const count = Math.max(1, Array.isArray(data) ? data.length : (Array.isArray(data.records) ? data.records.length : 1));
-        $('byte-count').textContent = `${bytes.toLocaleString()} compact JSON bytes · ${count.toLocaleString()} records`;
-        previewTaskId ||= `JOB-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-        return {task_id: previewTaskId, task_type: 'synthetic_telemetry_digest', source,
-          priority: $('task-priority').value, workload_profile: profile, record_count: count, data};
+        if (!source) throw new Error('Enter the camera source name.');
+        if (preparedImageBase64.length > 4_000_000) throw new Error('Encoded image exceeds the 3 MB upload limit; choose Quick or Standard detail.');
+        const canvas = $('input-image');
+        previewTaskId ||= 'JOB-' + Date.now().toString(36).toUpperCase() + '-' +
+          Math.random().toString(36).slice(2, 6).toUpperCase();
+        return {task_id: previewTaskId, task_type: 'surface_defect_inspection', source,
+          priority: $('task-priority').value, workload_profile: $('workload-profile').value,
+          record_count: 1, image_width: canvas.width, image_height: canvas.height,
+          sensitivity: $('inspection-sensitivity').value, image_base64: preparedImageBase64};
       }
 
       function updatePayloadPreview() {
-        let payload;
+        let preview;
         try {
-          payload = payloadFromForm();
-          $('payload-preview').textContent = JSON.stringify(payload, null, 2);
+          const payload = payloadFromForm();
+          preview = JSON.stringify(envelopeFor(payload), null, 2);
           $('payload-preview').style.color = '#86c8ff';
+          $('byte-count').textContent = Math.floor(preparedImageBase64.length * 3 / 4).toLocaleString() + ' encoded image bytes';
         } catch (error) {
-          $('payload-preview').textContent = error.message;
+          preview = error.message;
           $('payload-preview').style.color = '#f0a0a0';
-          const bytes = new TextEncoder().encode($('task-data').value).length;
-          $('byte-count').textContent = `${bytes.toLocaleString()} typed bytes · invalid JSON`;
         }
-        const json = $('payload-preview').textContent;
-        if (submittedPayloadJson && json !== submittedPayloadJson) {
+        $('payload-preview').textContent = preview;
+        if (submittedPayloadJson && preview !== submittedPayloadJson) {
           $('output-tag').textContent = 'Input changed';
-          $('result-reason').textContent = 'The input changed after this result. Run the task again to compare the new payload.';
+          $('result-reason').textContent = 'The job settings changed after this result. Run the inspection again to process the new input.';
         }
       }
 
@@ -424,7 +485,7 @@
       }
 
       function showTaskRunning(payload) {
-        submittedPayloadJson = JSON.stringify(payload, null, 2);
+        submittedPayloadJson = JSON.stringify(envelopeFor(payload), null, 2);
         $('output-placeholder').style.display = 'none';
         $('result-state').classList.add('visible');
         $('output-tag').textContent = 'Running';
@@ -434,10 +495,11 @@
         $('result-request').textContent = 'waiting for response';
         $('result-total').textContent = 'Running…';
         $('result-compute').textContent = '—';
-        $('result-bytes').textContent = `${new TextEncoder().encode(JSON.stringify(payload.data)).length.toLocaleString()} B`;
-        $('result-job').textContent = payload.task_id;
-        $('result-digest').textContent = 'Waiting for worker output…';
-        $('result-reason').textContent = 'The edge gateway is selecting a destination and executing the workload.';
+        $('result-verdict').textContent = 'Inspecting…';
+        $('result-defects').textContent = '—';
+        $('result-image').removeAttribute('src');
+        $('defect-list').textContent = '';
+        $('result-reason').textContent = 'The gateway is comparing local and cloud estimates, then the selected worker will inspect the image.';
         $('response-json').textContent = 'Waiting for response…';
       }
 
@@ -447,14 +509,22 @@
         const badge = $('destination-badge');
         badge.className = `destination-badge ${result.fallback ? 'fallback' : destination}`;
         badge.textContent = result.fallback ? 'EDGE FALLBACK' : `${destination.toUpperCase()} WORKER`;
-        $('result-request').textContent = `${payload.source} · ${String(result.task_id || result.request_id || '—')}`;
-        $('result-total').textContent = `${Number(result.completion_ms || 0).toFixed(1)} ms`;
-        $('result-compute').textContent = `${Number(result.compute_ms || 0).toFixed(1)} ms`;
-        $('result-bytes').textContent = `${Number(result.input_bytes ?? new TextEncoder().encode(JSON.stringify(payload.data)).length).toLocaleString()} B`;
-        $('result-job').textContent = `${payload.record_count} records · ${payload.workload_profile}`;
-        $('result-digest').textContent = result.digest || 'No digest returned';
-        $('result-reason').textContent = result.reason || (result.fallback ? 'The cloud request failed and the edge completed the task.' : `The active ${String(result.policy || 'routing')} policy selected ${destination}.`);
-        $('response-json').textContent = JSON.stringify(result, null, 2);
+        $('result-request').textContent = payload.source + ' · ' + String(result.task_id || result.request_id || '—');
+        $('result-total').textContent = Number(result.completion_ms || 0).toFixed(1) + ' ms';
+        $('result-compute').textContent = Number(result.compute_ms || 0).toFixed(1) + ' ms';
+        $('result-verdict').textContent = result.verdict || 'No verdict';
+        $('result-verdict').style.color = result.verdict === 'PASS' ? '#8be0bd' : '#f2bd72';
+        $('result-defects').textContent = Number(result.defect_count || 0).toLocaleString();
+        if (result.annotated_image_base64) $('result-image').src = 'data:image/jpeg;base64,' + result.annotated_image_base64;
+        $('defect-list').textContent = (result.defects || []).map((defect, index) =>
+          'D' + (index + 1) + ' · ' + defect.width + ' × ' + defect.height + 'px · ' +
+          defect.area_pixels.toLocaleString() + ' anomalous pixels').join('\n') ||
+          'No regions exceeded the selected contrast threshold.';
+        $('result-reason').textContent = result.verdict + ': ' + Number(result.defect_count || 0) +
+          ' suspected local-contrast region(s). ' + (result.reason || ('Routed to ' + destination +
+          (result.fallback ? ' after cloud fallback.' : '.')));
+        const {annotated_image_base64, ...summary} = result;
+        $('response-json').textContent = JSON.stringify(summary, null, 2);
       }
 
       function showTaskError(error) {
@@ -464,9 +534,10 @@
         const badge = $('destination-badge'); badge.className = 'destination-badge error'; badge.textContent = 'NO RESULT';
         $('result-request').textContent = 'request failed';
         $('result-total').textContent = '—'; $('result-compute').textContent = '—';
-        $('result-bytes').textContent = `${new TextEncoder().encode($('task-data').value).length.toLocaleString()} B`;
-        $('result-job').textContent = '—';
-        $('result-digest').textContent = 'No output was returned.';
+        $('result-verdict').textContent = 'ERROR'; $('result-verdict').style.color = '#f08b8b';
+        $('result-defects').textContent = '—';
+        $('result-image').removeAttribute('src');
+        $('defect-list').textContent = '';
         $('result-reason').textContent = error.message;
         $('response-json').textContent = JSON.stringify({error: error.message}, null, 2);
       }
@@ -493,7 +564,8 @@
         $('events').innerHTML = rows.map(event => {
           const destination = String(event.destination || 'edge').toLowerCase();
           const label = destination === 'cloud' ? 'CLOUD' : 'EDGE';
-          return `<div class="event-row ${destination === 'cloud' ? 'cloud' : ''}"><span class="event-marker"></span><div class="event-main"><div class="event-destination">${label}${event.fallback ? ' · FALLBACK' : ''} · ${escapeHtml(event.task_id || event.request_id || 'JOB')}</div><div class="event-reason">${escapeHtml(event.source || 'source')} · ${Number(event.record_count || 1)} records · ${escapeHtml(event.reason || 'Policy decision')}</div></div><span class="event-time">${Number(event.completion_ms || 0).toFixed(1)} ms</span></div>`;
+          const outcome = event.verdict ? event.verdict + ' · ' + (event.defect_count || 0) + ' suspected defects' : 'Task completed';
+          return `<div class="event-row ${destination === 'cloud' ? 'cloud' : ''}"><span class="event-marker"></span><div class="event-main"><div class="event-destination">${label}${event.fallback ? ' · FALLBACK' : ''} · ${escapeHtml(event.task_id || event.request_id || 'JOB')}</div><div class="event-reason">${escapeHtml(event.source || 'source')} · ${escapeHtml(outcome)} · ${escapeHtml(event.reason || 'Policy decision')}</div></div><span class="event-time">${Number(event.completion_ms || 0).toFixed(1)} ms</span></div>`;
         }).join('');
         const newest = rows[0];
         if (newest) updateRoute(newest.destination, newest.fallback, '');
@@ -627,14 +699,23 @@
           setFeedback(`Job ${result.task_id} from ${result.source} was routed to ${result.destination} and completed in ${Number(result.completion_ms).toFixed(1)} ms.`);
           await refresh();
         } catch (error) { showTaskError(error); setFeedback(`Task failed: ${error.message}`); toast(error.message, true); }
-        finally { button.disabled = false; button.textContent = 'Run task →'; }
+        finally { button.disabled = false; button.textContent = 'Inspect image →'; }
       });
 
-      ['task-data', 'task-source', 'task-priority', 'workload-profile'].forEach(id => {
-        $(id).addEventListener('input', () => { previewTaskId = null; updatePayloadPreview(); });
-        $(id).addEventListener('change', () => { previewTaskId = null; updatePayloadPreview(); });
+      $('choose-image').addEventListener('click', () => $('inspection-file').click());
+      $('sample-image').addEventListener('click', loadSampleImage);
+      $('inspection-file').addEventListener('change', async event => {
+        try {
+          await loadInspectionFile(event.target.files[0]);
+          setFeedback('Image ready. Set a policy, then submit the inspection job.');
+        } catch (error) { toast(error.message, true); }
       });
-      updatePayloadPreview();
+      $('task-source').addEventListener('input', () => { previewTaskId = null; updatePayloadPreview(); });
+      ['task-priority', 'inspection-sensitivity'].forEach(id => $(id).addEventListener('change', () => {
+        previewTaskId = null; updatePayloadPreview();
+      }));
+      $('workload-profile').addEventListener('change', redrawInspectionImage);
+      loadSampleImage();
 
       document.querySelectorAll('[data-scenario]').forEach(button => button.addEventListener('click', async () => {
         document.querySelectorAll('[data-scenario]').forEach(item => item.setAttribute('aria-pressed', 'false'));

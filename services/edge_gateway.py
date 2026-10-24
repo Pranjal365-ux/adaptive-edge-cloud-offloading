@@ -17,10 +17,10 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from offloader.costs import CostModel
-from offloader.workload import compute
+from offloader.tasks import execute
 
 LOG = logging.getLogger("offloadops.edge")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -36,16 +36,20 @@ CLOUD_URL = os.getenv("CLOUD_URL", "http://cloud:8081").rstrip("/")
 CLOUD_PROXY_API = os.getenv("TOXIPROXY_API", "http://toxiproxy:8474").rstrip("/")
 CLOUD_API_KEY = os.getenv("CLOUD_API_KEY", "local-demo-key")
 EDGE_WORKERS = max(1, int(os.getenv("EDGE_WORKERS", "2")))
-EDGE_MIPS = float(os.getenv("EDGE_MIPS", "500"))
-CLOUD_MIPS = float(os.getenv("CLOUD_MIPS", "3000"))
-EDGE_MS_PER_ITERATION = float(os.getenv("EDGE_MS_PER_ITERATION", "0.00012"))
-CLOUD_MS_PER_ITERATION = float(os.getenv("CLOUD_MS_PER_ITERATION", "0.00004"))
+EDGE_MS_PER_WORK_UNIT = float(os.getenv("EDGE_MS_PER_WORK_UNIT", "0.00012"))
+CLOUD_MS_PER_WORK_UNIT = float(os.getenv("CLOUD_MS_PER_WORK_UNIT", "0.00004"))
 CLOUD_WORKERS = max(1, int(os.getenv("CLOUD_WORKERS", "2")))
-FIXED_THRESHOLD = float(os.getenv("FIXED_THRESHOLD_MI", "500"))
+FIXED_THRESHOLD = float(os.getenv("FIXED_THRESHOLD_UNITS", "500000"))
 CLOUD_COST_PER_SECOND = float(os.getenv("CLOUD_USD_PER_COMPUTE_SECOND", "0.0001"))
 COST_WEIGHT = float(os.getenv("COST_WEIGHT_SECONDS_PER_USD", "100"))
-MAX_BODY_BYTES = 262_144
+MAX_BODY_BYTES = 4_500_000
 TASKS = Counter("edge_decisions_total", "Edge decisions", ["policy", "destination"])
+INSPECTIONS = Counter("edge_inspections_total", "Routed image inspections by destination and verdict",
+                      ["destination", "verdict"])
+DEFECTS = Counter("edge_suspected_defects_total", "Suspected surface anomalies returned to callers",
+                  ["destination"])
+IMAGE_PIXELS = Histogram("edge_inspection_pixels", "Pixels inspected per image job",
+                          buckets=(65_536, 262_144, 524_288, 1_000_000, 1_600_000, 2_400_000))
 COMPLETION = Histogram("edge_completion_seconds", "End-to-end task latency", ["policy"],
                        buckets=(.01, .05, .1, .25, .5, 1, 2, 5, 10, 30))
 QUEUE = Gauge("edge_queue_depth", "Queued or active local edge tasks")
@@ -72,35 +76,27 @@ _scenario_task: asyncio.Task | None = None
 class ComputeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     task_id: str = Field(default_factory=lambda: f"JOB-{uuid.uuid4().hex[:10].upper()}", min_length=1, max_length=80)
-    task_type: Literal["synthetic_telemetry_digest"] = "synthetic_telemetry_digest"
+    task_type: Literal["surface_defect_inspection"] = "surface_defect_inspection"
     source: str = Field(default="sensor-gateway-07", min_length=1, max_length=100)
     priority: Literal["low", "normal", "high"] = "normal"
     workload_profile: Literal["quick", "balanced", "heavy"] = "balanced"
     record_count: int = Field(default=1, ge=1, le=10_000)
-    iterations: int | None = Field(default=None, ge=1, le=2_000_000)
-    data: str | dict | list = Field(default="{}")
-
-    @field_validator("data", mode="before")
-    @classmethod
-    def encode_data(cls, value):
-        if isinstance(value, (dict, list)):
-            return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        return value
-
-    @field_validator("data")
-    @classmethod
-    def validate_utf8_size(cls, value: str) -> str:
-        if not isinstance(value, str):
-            raise ValueError("data must be text, a JSON object, or a JSON array")
-        if len(value.encode("utf-8")) > 200_000:
-            raise ValueError("data must be at most 200000 UTF-8 bytes")
-        return value
+    image_base64: str | None = Field(default=None, max_length=4_000_000)
+    image_width: int | None = Field(default=None, ge=64, le=2048)
+    image_height: int | None = Field(default=None, ge=64, le=2048)
+    sensitivity: Literal["low", "normal", "high"] = "normal"
 
     @model_validator(mode="after")
-    def resolve_profile(self):
-        if self.iterations is None:
-            self.iterations = {"quick": 50_000, "balanced": 300_000, "heavy": 900_000}[self.workload_profile]
+    def validate_image(self):
+        if not self.image_base64 or self.image_width is None or self.image_height is None:
+            raise ValueError("image_base64, image_width, and image_height are required for inspection")
+        if self.image_width * self.image_height > 2_400_000:
+            raise ValueError("image is too large; choose a lower inspection detail")
         return self
+
+    @property
+    def work_units(self) -> int:
+        return max(1, (self.image_width * self.image_height + 1) // 2)
 
 
 class PolicyUpdate(BaseModel):
@@ -161,12 +157,13 @@ def add_event(event: dict) -> None:
 
 
 def choose_destination(payload: ComputeRequest, active_local: int) -> tuple[str, dict]:
-    workload_ms = payload.iterations * EDGE_MS_PER_ITERATION
+    workload_ms = payload.work_units * EDGE_MS_PER_WORK_UNIT
     edge_wait_ms = active_local * workload_ms / EDGE_WORKERS
     edge_ms = edge_wait_ms + workload_ms
-    input_bytes = len(payload.data.encode("utf-8"))
+    input_bytes = (len(payload.image_base64.encode("ascii")) if payload.task_type == "surface_defect_inspection"
+                   else len(payload.data.encode("utf-8")))
     transfer_ms = input_bytes * 0.008 / max(_bandwidth_ewma_mbps, 0.01)
-    cloud_service_ms = payload.iterations * CLOUD_MS_PER_ITERATION
+    cloud_service_ms = payload.work_units * CLOUD_MS_PER_WORK_UNIT
     cloud_wait_ms = (_active_cloud / CLOUD_WORKERS) * cloud_service_ms
     cloud_ms = _rtt_ewma_ms + transfer_ms + cloud_wait_ms + cloud_service_ms
     cost_usd = CostModel(compute_usd_per_second=CLOUD_COST_PER_SECOND).estimate(
@@ -179,8 +176,8 @@ def choose_destination(payload: ComputeRequest, active_local: int) -> tuple[str,
         destination = "cloud"
         reason = "Cloud-only policy"
     elif policy == "threshold":
-        destination = "cloud" if payload.iterations > FIXED_THRESHOLD else "edge"
-        reason = f"Fixed work threshold {FIXED_THRESHOLD:g} iterations"
+        destination = "cloud" if payload.work_units > FIXED_THRESHOLD else "edge"
+        reason = f"Fixed workload threshold {FIXED_THRESHOLD:g} units"
     else:
         cloud_adjusted_ms = cloud_ms + COST_WEIGHT * cost_usd * 1000
         destination = "cloud" if cloud_adjusted_ms < edge_ms else "edge"
@@ -193,16 +190,16 @@ def choose_destination(payload: ComputeRequest, active_local: int) -> tuple[str,
         "cloud_cost_estimate_usd": cost_usd}
 
 
-def learn_service_rate(destination: str, iterations: int, compute_ms: float) -> None:
-    """Update measured milliseconds per iteration using successful worker responses."""
-    global EDGE_MS_PER_ITERATION, CLOUD_MS_PER_ITERATION
-    if iterations <= 0 or compute_ms < 0:
+def learn_service_rate(destination: str, work_units: int, compute_ms: float) -> None:
+    """Update measured milliseconds per image-work unit after successful processing."""
+    global EDGE_MS_PER_WORK_UNIT, CLOUD_MS_PER_WORK_UNIT
+    if work_units <= 0 or compute_ms < 0:
         return
-    measured = compute_ms / iterations
+    measured = compute_ms / work_units
     if destination == "edge":
-        EDGE_MS_PER_ITERATION = .8 * EDGE_MS_PER_ITERATION + .2 * measured
+        EDGE_MS_PER_WORK_UNIT = .8 * EDGE_MS_PER_WORK_UNIT + .2 * measured
     else:
-        CLOUD_MS_PER_ITERATION = .8 * CLOUD_MS_PER_ITERATION + .2 * measured
+        CLOUD_MS_PER_WORK_UNIT = .8 * CLOUD_MS_PER_WORK_UNIT + .2 * measured
 
 
 async def run_edge(payload: ComputeRequest, request_id: str):
@@ -214,8 +211,8 @@ async def run_edge(payload: ComputeRequest, request_id: str):
     try:
         async with app.state.semaphore:
             result = await asyncio.get_running_loop().run_in_executor(
-                app.state.pool, compute, {"iterations": payload.iterations, "data": payload.data})
-        learn_service_rate("edge", payload.iterations, result["compute_ms"])
+                app.state.pool, execute, payload.model_dump())
+        learn_service_rate("edge", payload.work_units, result["compute_ms"])
         return result
     finally:
         async with _local_lock:
@@ -376,11 +373,13 @@ async def submit_task(payload: ComputeRequest, request: Request):
         _cloud_inflight_metric.set(_active_cloud)
         try:
             response = await app.state.client.post(f"{CLOUD_URL}/compute",
-                json={"iterations": payload.iterations, "data": payload.data},
+                json={key: getattr(payload, key) for key in
+                      ("task_type", "image_base64", "image_width",
+                       "image_height", "sensitivity")},
                 headers={"X-API-Key": CLOUD_API_KEY, "X-Request-ID": request_id})
             response.raise_for_status()
             result = response.json()
-            learn_service_rate("cloud", payload.iterations, result.get("compute_ms", 0))
+            learn_service_rate("cloud", payload.work_units, result.get("compute_ms", 0))
             await record_cloud_success()
             TASKS.labels(policy=decision["policy"], destination="cloud").inc()
             CLOUD_COST.inc(result.get("compute_ms", 0) / 1000 * CLOUD_COST_PER_SECOND)
@@ -394,8 +393,16 @@ async def submit_task(payload: ComputeRequest, request: Request):
             _active_cloud -= 1
             _cloud_inflight_metric.set(_active_cloud)
     if destination == "edge":
-        result = await run_edge(payload, request_id)
+        try:
+            result = await run_edge(payload, request_id)
+        except ValueError as exc:
+            ERRORS.labels(kind="task_validation").inc()
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         TASKS.labels(policy=decision["policy"], destination="edge").inc()
+    if payload.task_type == "surface_defect_inspection":
+        INSPECTIONS.labels(destination=destination, verdict=result["verdict"]).inc()
+        DEFECTS.labels(destination=destination).inc(result.get("defect_count", 0))
+        IMAGE_PIXELS.observe(result["pixels_processed"])
     elapsed = time.perf_counter() - start
     COMPLETION.labels(policy=decision["policy"]).observe(elapsed)
     event = {"request_id": request_id, "task_id": payload.task_id, "task_type": payload.task_type,
@@ -403,7 +410,8 @@ async def submit_task(payload: ComputeRequest, request: Request):
         "workload_profile": payload.workload_profile, "policy": decision["policy"],
         "destination": destination, "reason": decision["reason"],
         "completion_ms": round(elapsed * 1000, 3), "fallback": fallback,
-        "digest": result["digest"]}
+        "verdict": result.get("verdict"), "defect_count": result.get("defect_count"),
+        "digest": result.get("digest")}
     add_event(event)
     return {**result, **decision, "task_id": payload.task_id, "task_type": payload.task_type,
         "source": payload.source, "priority": payload.priority, "record_count": payload.record_count,

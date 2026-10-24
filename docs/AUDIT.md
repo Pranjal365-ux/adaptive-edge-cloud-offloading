@@ -5,13 +5,14 @@ Baseline inspected: c0bdfade4b7bff4ec364734344988907a2e55b66.
 | Component | Purpose | Scope and audit finding |
 |---|---|---|
 | offloading.py | FIFO discrete-event simulator and development-only threshold selection | Synthetic MI, Mbps, one-way delay, CPU service prices; queued transfer sampling and nearest-rank p95 corrected |
-| azure_function/workload.py | Deterministic SHA-256 chain shared by laptop and Function | One initial hash of input, then iteration hashes of the 32-byte digest; input size is not multiplied by iteration count; reject nonobject JSON |
-| azure_function/function_app.py | Function-authenticated HTTP POST worker | Added hashed process identifier and first successful request flag; this flag does not establish platform cold-start duration |
-| live_probe.py | Sequential paired pilot | Digests, local wall/compute time, Azure compute, full HTTPS call, JSON-body byte counts; saves after each observation |
-| live_experiment.py | Four-policy live experiment | Separate development calibration, immutable pre-run protocol, identical seeded traces, shuffled policy order, per-task error retention, process-based local executor |
-| terraform/main.tf | Azure infrastructure and ZIP code deployment | Central India; Python 3.12, Linux Y1, LRS storage; reviewed plan required and endpoint verification required |
-| test_model.py, test_integrity.py, test_live.py | Behavioral and regression checks | Determinism, decisions, digest correctness, malformed input, p95, changing link state, no duplicate timed work, retained errors |
-| plot_results.py, dashboard.py | Synthetic result visualization | Dashboard reads simulator; not deployment monitoring |
+| services/edge_gateway.py, services/cloud_worker.py | Live HTTP routing and workers | Image inspection request validation, adaptive route, local fallback, Prometheus metrics |
+| offloader/inspection.py | Surface scratch inspection processor | Explainable neighborhood contrast heuristic; pixel and image input are bounded; returns candidate boxes and annotated image; not a certified QA model |
+| azure_function/workload.py, azure_function/function_app.py | Retained Azure Functions prototype | Deterministic SHA-256 chain and authenticated HTTP worker from the original experiment; separate from the active image-inspection demo |
+| experiments/live_probe.py | Sequential paired historical pilot | Digests, local wall/compute time, Azure compute, full HTTPS call, JSON-body byte counts; saves after each observation |
+| experiments/live_experiment.py | Historical four-policy live experiment | Separate development calibration, immutable pre-run protocol, identical seeded traces, shuffled policy order, per-task error retention, process-based local executor |
+| terraform/ | Retained legacy Azure Functions infrastructure prototype | Kept for provenance and prior deployment work; active Container Apps deployment is under infra/ |
+| tests/ | Behavioral and regression checks | Simulator, policy, integrity, historical live-experiment, and package checks |
+| experiments/plot_results.py, experiments/dashboard.py | Synthetic result visualization | Dashboard reads simulator; not deployment monitoring |
 | sample_results/ | Historical synthetic examples | Never cite as measured Azure results; regenerate final simulation |
 
 ## Claims and boundaries
@@ -34,6 +35,6 @@ Final protocol and pilot analysis live in the saved evidence directory. Do not t
 
 ## Commands
 
-Use an isolated Python environment with the versions retained in evidence/software.txt. Run `python -m unittest -v` and `python offloading.py --tasks 300 --seeds 20 --output results`. Live usage is `python live_experiment.py --url HTTPS_ENDPOINT --calibrate-only --output live_results`, followed by the same settings with `--protocol live_results/protocol.json` instead of `--calibrate-only`. Obtain the Function key directly into AZURE_FUNCTION_KEY using Azure CLI; never paste it into chat or command-line arguments. Keep all Terraform state, saved plans and keys private.
+Use an isolated Python environment with the versions retained in evidence/software.txt. The maintained project checks are in `tests/` and run with `python -m pytest`; the simulator command is `python offloading.py --tasks 300 --seeds 20 --output results`. Historical live SHA-chain experiment entry points are retained under `experiments/` for provenance and are separate from the current surface-inspection service demo. Azure Functions code and its older Terraform prototype remain under `azure_function/` and `terraform/`; active Azure Container Apps deployment instructions are in `docs/AZURE_DEPLOY.md` and use `infra/`. Keep all Terraform state, saved plans and keys private.
 
 Byte accounting with failures: transferred_input_bytes counts attempted offload payloads, including failed requests, not confirmed delivery. request_body_bytes and response_body_bytes sum successful exchanges; failure rows use zero as an unmeasured placeholder, not proof of no transfer. Report failed-exchange bytes as unknown.
