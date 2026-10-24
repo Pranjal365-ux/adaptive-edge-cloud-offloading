@@ -100,7 +100,7 @@ Simulator cost is an explicit synthetic model and does not represent an Azure in
 - **Containers:** separate multi-stage edge and cloud images, non-root runtime users, health checks, bounded resources, and pinned direct service dependencies.
 - **Observability:** Prometheus metrics, Grafana provisioning, JSON request logs, correlation IDs, and optional OpenTelemetry export when `APPLICATIONINSIGHTS_CONNECTION_STRING` is configured. The SDK follows the [Azure Monitor OpenTelemetry Python configuration](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-configuration).
 - **Supply chain:** Dependabot checks Python, Docker, Terraform, and GitHub Actions dependencies; a tag or manual workflow can publish SHA-tagged images to GHCR.
-- **CI/CD:** pull requests and supported branch pushes run validation; version tags publish immutable images after quality gates; an operator selects a full-SHA image for protected Azure deployment. See [the CI/CD guide](docs/CICD.md).
+- **CI/CD:** pull requests and supported branch pushes run validation; version tags publish immutable images after quality gates; the Azure deployment workflow can build and deploy the tested main commit after CI succeeds, or accept an existing full-SHA image tag through manual dispatch. See [the CI/CD guide](docs/CICD.md).
 - **Infrastructure as code:** new Azure Container Apps environments are in `infra/`; `azure_function/` and `terraform/` retain the older Azure Functions prototype. The active deployment guide uses `infra/`.
 - **Secrets:** no `.env`, API key, Terraform state, or plan belongs in Git. The Compose key is a local demo default only. Azure reads its worker key from Key Vault through a user-assigned managed identity.
 
@@ -108,8 +108,8 @@ Simulator cost is an explicit synthetic model and does not represent an Azure in
 
 Terraform is organized into bootstrap state storage and separate `dev`/`prod` roots. The Container App uses HTTPS ingress, multiple revisions for canary traffic, scale-to-zero by default, bounded replicas, Log Analytics, Application Insights, a Key Vault secret reference, and email budget/service alerts. The region has no Terraform default. Alerts notify; they do not stop spending.
 
-Only local formatting, initialization without a backend, and validation are part of normal CI. No workflow deploys Azure resources. Follow the manual PowerShell commands and university-tenant caveats in [docs/AZURE_DEPLOY.md](docs/AZURE_DEPLOY.md). Useful queries are in [docs/KQL.md](docs/KQL.md).
+Only local formatting, initialization without a backend, and validation are part of normal CI. The checked-in deploy-azure.yml workflow can deploy the cloud worker after CI succeeds on main or through manual dispatch, when its protected environment and Azure OIDC settings are configured. Workflow presence does not confirm a successful deployment. Follow the manual PowerShell commands and university-tenant caveats in [docs/AZURE_DEPLOY.md](docs/AZURE_DEPLOY.md). Useful queries are in [docs/KQL.md](docs/KQL.md).
 
 ## Five-minute classroom demo
 
-See [the presenter script](docs/DEMO.md) for click-by-click steps and what to point out at each step.
+See [the presenter script](docs/DEMO.md) for click-by-click steps and [the presentation handoff](docs/PRESENTATION_HANDOFF.md) for checks Pranjal should run on the presentation machine. Presentation view retains the inspection controls and results while hiding charts and technical details.
