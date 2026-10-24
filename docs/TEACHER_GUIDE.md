@@ -1,119 +1,45 @@
-# Project Structure & Teacher Walkthrough Guide
+# Presenter and viva notes
 
-Use this quick-reference guide during your viva/presentation to explain the architecture, demonstrate the live system, and show the examiner your cloud deployment.
+## Project in one sentence
 
----
+OffloadOps routes surface-inspection tasks between edge and cloud workers using selectable policies, and includes a separate simulator for controlled policy comparisons.
 
-## 1. What This Project Actually Is
+## Explain the architecture
 
-**OffloadOps** is an **Adaptive Edge-to-Cloud Task Offloader** designed for Industrial Computer Vision (Surface-Defect Inspection on Manufactured Parts).
+Image in browser → edge gateway → local worker OR configured cloud worker → annotated result.
 
-### The Real-World Engineering Problem
-- **Edge Device (Local Gateway):** Fast, zero-bandwidth latency, but bounded compute (limited CPU/workers). Queues build up under high load.
-- **Cloud Worker (Azure Container Apps):** Elastic, scalable, high-throughput compute, but incurs network transit time (uploading high-res images) and cloud costs.
-- **The Core Solution:** An intelligent edge gateway that monitors real-time network latency (EWMA RTT via Toxiproxy), available throughput, and local vs. cloud worker queues to make optimal, per-task routing decisions (*Process locally* vs. *Offload to Cloud*). If the cloud connection degrades or severs, a built-in **Circuit Breaker** automatically falls back to local execution.
+Both workers use the same surface-inspection code. In the local Compose setup, Toxiproxy controls the cloud link and Prometheus/Grafana provide monitoring. A configured Azure worker is another deployment option. Pranjal must confirm the actual endpoint and routing path before claiming a live Azure demonstration.
 
----
+## Questions to prepare for
 
-## 2. Clean Project Architecture Map
+| Question | Answer |
+|---|---|
+| What is the threshold? | Fixed-threshold routing compares estimated workload with a configured cutoff. The live code defaults to 500,000 work units; deployment configuration can override it. |
+| What makes routing adaptive? | It updates network and service-time estimates, estimates waiting time, and compares edge time with cloud time plus a weighted estimated cost. |
+| Is this machine learning? | No trained model is used for routing or inspection. Routing uses estimates; inspection uses neighborhood contrast and connected regions. |
+| Why can cloud be slower? | Upload time, network overhead, queueing, and processing all contribute. More compute does not remove communication overhead. |
+| What is PASS or REVIEW? | PASS means the heuristic did not flag qualifying regions; REVIEW indicates candidate anomalies. Neither is a certified quality decision. |
+| Are predictions measurements? | No. Predicted edge/cloud times are estimates before execution. Gateway elapsed and worker compute come from the completed request. Gateway elapsed excludes the browser-to-gateway connection. |
+| Does priority change routing? | The priority field is metadata in this implementation; it does not establish priority scheduling. |
+| Does comparison change the policy? | No. It runs both paths concurrently and reports their individual results. Completed work can update service estimates. |
+| What happens when cloud fails? | A routed cloud task can fall back to local execution. Repeated failures can open the circuit breaker. Failure detection can add delay. |
+| Does adaptive always win? | No. Estimates can lag, conditions change, and workload matters. A single comparison is illustrative, not a benchmark conclusion. |
+| Are displayed costs Azure charges? | No. The cost model is synthetic. Historical sample CSVs are simulation outputs, not Azure measurements. |
+| Is the cloud really remote? | Answer according to the verified demo setup: a local container emulates the cloud role; Azure is a remote deployment only when configured and verified. |
 
-Here is the clean breakdown of the repository to show your professor:
+## Repository map
 
-```text
-offloadops/
-├── services/               # 🚀 LIVE RUNTIME MICROSERVICES
-│   ├── edge_gateway.py     # FastAPI edge gateway: adaptive policy engine & circuit breaker
-│   ├── cloud_worker.py     # Cloud worker: surface-defect anomaly detector & health API
-│   └── console.html        # Interactive browser UI for live image testing & metrics
-│
-├── offloader/              # 🧠 CORE PROCESSING & ALGORITHMS
-│   ├── inspection.py       # Deterministic pixel neighborhood contrast inspection heuristic
-│   ├── tasks.py            # Unified task dispatcher
-│   ├── costs.py            # Synthetic cost model
-│   └── workload.py         # Deterministic CPU compute benchmark
-│
-├── infra/                  # ☁️ INFRASTRUCTURE AS CODE (TERRAFORM)
-│   ├── modules/            # Reusable modules (Container Apps, Key Vault, Monitoring, Budget)
-│   ├── envs/dev/           # Active development environment deployed to Azure
-│   └── bootstrap/          # Azure storage backend for remote .tfstate locking
-│
-├── .github/workflows/      # 🔄 DEVOPS & CI/CD PIPELINES
-│   ├── ci.yml              # Automated quality gates (Pytest, Ruff, Container build, TF validate)
-│   ├── deploy-azure.yml    # Continuous Deployment: builds tested commit & deploys to ACA
-│   └── build-push.yml      # Container packaging & image publishing
-│
-├── toxiproxy/              # ⚡ CHAOS ENGINEERING & NETWORK SIMULATION
-│   └── config.json         # Emulates high latency, packet loss, bandwidth throttling
-│
-├── monitoring/             # 📊 SRE & OBSERVABILITY
-│   ├── prometheus.yml      # Time-series metrics collection configuration
-│   └── grafana/            # Pre-provisioned dashboards (worker utilization, RTT, queue depth)
-│
-├── tests/                  # 🧪 AUTOMATED TESTS & VERIFICATION
-│   ├── test_inspection.py  # Computer vision & defect detection test cases
-│   ├── test_integrity.py   # System invariants & regression checks
-│   └── test_live.py        # Edge gateway routing & fallback tests
-│
-├── offloading.py           # 📈 Monte Carlo discrete-event simulator (baseline comparisons)
-├── docker-compose.yml      # Complete local reproducible multi-container stack
-└── tasks.ps1               # Automated developer task runner
-```
+- services/: edge gateway, cloud worker, browser console.
+- offloader/: shared image processor, policies, simulator, and synthetic cost model.
+- monitoring/ and toxiproxy/: observability and controlled network scenarios.
+- infra/: current Container Apps infrastructure; terraform/ and azure_function/ retain the older prototype.
+- .github/workflows/: validation, image publishing, and Azure deployment configuration.
+- sample_results/: historical synthetic examples.
 
----
+## Deployment statements that need confirmation
 
-## 3. Live Azure Cloud Deployment
+An older version of this guide named an Azure deployment as live. That is a historical claim, not a current readiness check. Confirm readiness and the running revision on Pranjal's machine before presenting it as deployed.
 
-The cloud worker is already live and running on serverless **Azure Container Apps**:
+The checked-in deploy-azure.yml workflow is configured to deploy after CI succeeds on main, or manually using an immutable image tag. It requires the azure-production environment, Azure variables, and OIDC access. The presence of the workflow is not proof that a GitHub Actions run succeeded.
 
-- **Live Azure Worker URL:**  
-  `https://ca-offloadops-kfopl1-cloud.bluesand-000252f5.centralindia.azurecontainerapps.io`
-- **Readiness Verification Endpoint:**  
-  `https://ca-offloadops-kfopl1-cloud.bluesand-000252f5.centralindia.azurecontainerapps.io/ready`
-- **Service Version & Replica Status:**  
-  `https://ca-offloadops-kfopl1-cloud.bluesand-000252f5.centralindia.azurecontainerapps.io/version`
-- **Azure Region:** `centralindia`
-- **Resource Group:** `rg-offloadops-kfopl1`
-
----
-
-## 4. How to Run the 5-Minute Presentation for Your Teacher
-
-### Step 1: Open the Interactive Local Console
-In PowerShell, run:
-```powershell
-.\tasks.ps1 demo
-```
-This launches the Docker Compose stack (Edge Gateway, Cloud Worker, Toxiproxy, Prometheus, Grafana) and opens your browser at **`http://localhost:8000/console`**.
-
-### Step 2: Demonstrate Edge vs. Cloud Offloading
-1. Click **Generate sample part** or upload an image.
-2. Select **Adaptive** policy and click **Inspect surface**.
-3. Point out:
-   - The annotated image highlighting surface scratches.
-   - The decision metric explaining *why* it chose Edge or Cloud based on queue size and latency.
-4. Click **Compare edge + cloud** to run both simultaneously and show the latency breakdown.
-
-### Step 3: Demonstrate Chaos Engineering & Circuit Breaker (The "Wow" Factor)
-1. In the console, switch the network scenario from `good` to `poor` or `lossy` (powered by Toxiproxy).
-2. Show how the measured RTT increases. The adaptive policy will immediately shift heavy image processing away from the slow cloud link to local edge execution.
-3. If the cloud container is killed (`docker compose stop cloud`), show the teacher that the **Circuit Breaker** trips, preventing cascading failures and instantly executing tasks locally with zero downtime.
-
----
-
-## 5. CD Pipeline Fix & Clarification
-
-### Why the CD Was Blocked & How It Is Configured
-In [`.github/workflows/deploy-azure.yml`](file:///c:/dev/offloadops/.github/workflows/deploy-azure.yml), the deployment job targets a GitHub Environment named `azure-production`. It uses passwordless **GitHub Actions OIDC Federation** with Azure instead of fragile long-lived passwords.
-
-The pipeline is triggered automatically whenever `CI` succeeds on `main`, or via manual `workflow_dispatch`. 
-
-For the CD job to execute in GitHub Actions:
-1. Go to your GitHub repository: `https://github.com/Pranjal365-ux/adaptive-edge-cloud-offloading`.
-2. Navigate to **Settings** $\rightarrow$ **Environments** $\rightarrow$ Create `azure-production`.
-3. Add the following repository/environment variables:
-   - `AZURE_CLIENT_ID`: (Your Entra App Client ID for GitHub OIDC)
-   - `AZURE_TENANT_ID`: `29bebd42-f1ff-4c3d-9688-067e3460dc1f`
-   - `AZURE_SUBSCRIPTION_ID`: `a2a44ef0-d95e-4ca6-82a8-d0e057f8b75e`
-   - `AZURE_RESOURCE_GROUP`: `rg-offloadops-kfopl1`
-   - `AZURE_CLOUD_APP_NAME`: `ca-offloadops-kfopl1-cloud`
-   - `AZURE_ACR_NAME`: `offloadopskfopl1`
+The existing verification and blockers documents record earlier sessions. They are not an up-to-date status dashboard. Use [the handoff checklist](PRESENTATION_HANDOFF.md) for this UI change and [the demo script](DEMO.md) for the talk.
