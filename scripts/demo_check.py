@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import json
+import base64
+import io
 import subprocess
 import time
+import uuid
 import urllib.error
 import urllib.request
+
+from PIL import Image, ImageDraw
 
 GATEWAY = "http://127.0.0.1:8000"
 
@@ -25,6 +30,28 @@ def check(condition: bool, message: str) -> None:
     print(f"PASS {message}")
 
 
+def inspection_payload(source: str) -> dict:
+    """Build a small repeatable scratch-image job for routing smoke checks."""
+    image = Image.new("RGB", (640, 480), (184, 190, 196))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((105, 90, 530, 390), fill=(205, 210, 214), outline=(90, 98, 105), width=5)
+    draw.line((250, 160, 392, 310), fill=(42, 45, 47), width=9)
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=88)
+    return {
+        "task_id": f"smoke-{uuid.uuid4().hex[:12]}",
+        "task_type": "surface_defect_inspection",
+        "source": source,
+        "priority": "normal",
+        "workload_profile": "standard",
+        "record_count": 1,
+        "image_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        "image_width": image.width,
+        "image_height": image.height,
+        "sensitivity": "normal",
+    }
+
+
 def main() -> int:
     check(request("/healthz")[0] == 200, "gateway health")
     check(request("/readyz")[0] == 200, "gateway readiness")
@@ -34,10 +61,10 @@ def main() -> int:
     original = request("/policy")[1]["policy"]
     try:
         request("/policy", method="PUT", payload={"policy": "edge_only"})
-        _, edge = request("/tasks", method="POST", payload={"iterations": 20_000, "data": "smoke"})
+        _, edge = request("/tasks", method="POST", payload=inspection_payload("edge-smoke"))
         check(edge["destination"] == "edge", "policy hot-swap to edge")
         request("/policy", method="PUT", payload={"policy": "cloud_only"})
-        _, cloud = request("/tasks", method="POST", payload={"iterations": 20_000, "data": "smoke"})
+        _, cloud = request("/tasks", method="POST", payload=inspection_payload("cloud-smoke"))
         check(cloud["destination"] == "cloud", "policy hot-swap to cloud")
         _, metrics = request("/metrics")
         check(b"edge_decisions_total" in metrics and b"edge_completion_seconds" in metrics,
@@ -60,7 +87,7 @@ def main() -> int:
         try:
             for _ in range(3):
                 _, fallback = request("/tasks", method="POST",
-                    payload={"iterations": 20_000, "data": "fallback"})
+                    payload=inspection_payload("fallback-smoke"))
                 check(fallback["destination"] == "edge" and fallback["fallback"],
                       "cloud failure falls back to local edge execution")
             check(request("/status")[1]["circuit_open"], "cloud circuit breaker opens after failures")

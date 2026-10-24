@@ -1,27 +1,7 @@
-import hashlib
-import math
 import unittest
-from dataclasses import replace
-from unittest.mock import patch
-from azure_function.workload import compute
 from offloading import Simulation, Scenario, Task
 
 class IntegrityTests(unittest.TestCase):
-    def test_digest_reference_and_unicode(self):
-        data = 'é'
-        digest = hashlib.sha256(data.encode()).digest()
-        for _ in range(10):
-            digest = hashlib.sha256(digest).digest()
-        result = compute({'data': data, 'iterations': 10})
-        self.assertEqual(result['digest'], digest.hex())
-        self.assertEqual(result['input_bytes'], 2)
-
-    def test_bad_payloads(self):
-        for payload in (None, [], 'x', {}, {'iterations': True, 'data': ''},
-                        {'iterations': 2000001, 'data': ''}):
-            with self.assertRaises(ValueError):
-                compute(payload)
-
     def test_p95_nearest_rank_small_sample(self):
         tasks = [Task(i, i * 5, 100 + i, .01, .01) for i in range(21)]
         rows, summary = Simulation(Scenario('test', 1, 80, 20), tasks, 'edge_only', 100).run()

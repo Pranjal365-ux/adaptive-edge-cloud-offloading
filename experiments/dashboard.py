@@ -7,8 +7,8 @@ from pathlib import Path
 
 import streamlit as st
 
-HERE = Path(__file__).resolve().parent
-RESULTS = HERE / "dashboard_results"
+ROOT = Path(__file__).resolve().parents[1]
+RESULTS = ROOT / "dashboard_results"
 st.set_page_config(page_title="Edge Cloud Offloading", layout="wide")
 st.title("Adaptive Task Offloading")
 st.caption("Simulated edge and cloud resources; all policies replay the same task traces.")
@@ -20,7 +20,7 @@ with st.sidebar:
 
 if run:
     with st.spinner("Running simulation"):
-        subprocess.run([sys.executable, str(HERE / "offloading.py"),
+        subprocess.run([sys.executable, str(ROOT / "offloading.py"),
                         "--tasks", str(task_count), "--seeds", str(seeds),
                         "--output", str(RESULTS)], check=True)
 

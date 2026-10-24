@@ -16,7 +16,7 @@ PowerShell console / demo UI
                               Process pool
 ```
 
-The edge gateway accepts validated tasks, applies a runtime-selectable policy, and either computes locally in a process pool or calls the cloud worker. Toxiproxy lets the demo change latency and throughput without changing application code. Prometheus scrapes both services, and Grafana loads its dashboard and data source from checked-in provisioning files.
+The edge gateway accepts an image-based surface-defect inspection, applies a runtime-selectable policy, and either processes the image locally or calls the cloud worker. The worker compares each pixel with its neighborhood, groups strong contrast anomalies into candidate defects, and returns a PASS/REVIEW verdict with an annotated image. This explainable image-processing heuristic makes a convincing offload example because image size affects transfer cost and pixel count affects compute cost. It is a classroom demo, not a trained or certified factory QA system. Toxiproxy lets the demo change latency and throughput without changing application code. Prometheus scrapes both services, and Grafana loads its dashboard and data source from checked-in provisioning files.
 
 The simulator models the same baseline policies and adds stable, periodic, and seeded random-walk network scenarios. It writes the backward-compatible `summary.csv` and `tasks.csv`, plus seed-level `aggregate.csv`, matched-seed `paired.csv`, and `cost_sweep.csv`. The adaptive simulation policy uses EWMA network observations and learned service rates; `adaptive_oracle` uses exact simulator state and exists only as an upper-bound comparison.
 
@@ -52,7 +52,7 @@ Start the edge gateway, cloud worker, Toxiproxy, Prometheus, and Grafana:
 
 The console opens at [http://localhost:8000/console](http://localhost:8000/console). Grafana is at [http://localhost:3000](http://localhost:3000), and Prometheus is at [http://localhost:9090](http://localhost:9090). Those ports bind to loopback only. The local Grafana password is a demo default; set `GRAFANA_ADMIN_PASSWORD` in the PowerShell session before starting if you want a different local value.
 
-Use the UI to change policy, submit a sample task, apply a Toxiproxy scenario, and run the simulated same-trace race. `good`, `poor`, `flapping`, `random-walk`, and `lossy` scenarios are described under `scenarios/`. The `lossy` preset applies a connection timeout toxic; it does not emulate random packet-level loss.
+Use the UI to generate or upload a part image, review the image and inspection settings, then submit it. The result shows the edge/cloud route, PASS/REVIEW, suspected defects, compute and transfer timings, and an annotated image. Change policy or apply a Toxiproxy scenario to see how routing responds. `good`, `poor`, `flapping`, `random-walk`, and `lossy` scenarios are described under `scenarios/`. The `lossy` preset applies a connection timeout toxic; it does not emulate random packet-level loss. See [the inspection walkthrough](docs/SURFACE_INSPECTION.md) for the task semantics and limitations.
 
 The gateway API is also available directly:
 
@@ -60,9 +60,10 @@ The gateway API is also available directly:
 Invoke-RestMethod http://localhost:8000/healthz
 Invoke-RestMethod http://localhost:8000/policy
 Invoke-RestMethod -Method Put -Uri http://localhost:8000/policy -ContentType 'application/json' -Body '{"policy":"adaptive"}'
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/tasks -ContentType 'application/json' -Body '{"iterations":300000,"data":"hello edge cloud"}'
 Invoke-RestMethod -Method Put -Uri http://localhost:8000/scenario -ContentType 'application/json' -Body '{"name":"poor"}'
 ```
+
+Submit an image through the console so it can resize and encode the image into the validated inspection request. The request and response fields are documented in [the inspection walkthrough](docs/SURFACE_INSPECTION.md).
 
 Run live HTTP smoke checks, including fallback after stopping the local cloud container:
 
@@ -92,12 +93,14 @@ Simulator cost is an explicit synthetic model and does not represent an Azure in
 
 ## DevOps workflow
 
+- **Code map:** `offloader/` contains routing policies, simulation, and the shared inspection processor; `services/` contains the HTTP workers and browser console; `infra/` is the active Azure Container Apps deployment; `monitoring/` and `toxiproxy/` contain observability and network simulation; `tests/` contains automated checks; `experiments/` holds optional historical measurement tools and visualization code.
+
 - **Packaging:** `pyproject.toml` defines the core package and direct development/service dependency pins.
 - **Quality gates:** Ruff, pytest, branch coverage, simulator smoke run, and Linux/Windows CI.
 - **Containers:** separate multi-stage edge and cloud images, non-root runtime users, health checks, bounded resources, and pinned direct service dependencies.
 - **Observability:** Prometheus metrics, Grafana provisioning, JSON request logs, correlation IDs, and optional OpenTelemetry export when `APPLICATIONINSIGHTS_CONNECTION_STRING` is configured. The SDK follows the [Azure Monitor OpenTelemetry Python configuration](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-configuration).
 - **Supply chain:** Dependabot checks Python, Docker, Terraform, and GitHub Actions dependencies; a tag or manual workflow can publish SHA-tagged images to GHCR.
-- **Infrastructure as code:** new Azure Container Apps environments are in `infra/`; `terraform/` retains the older Azure Functions prototype and its existing local state artifacts. Never run the new commands from the legacy folder.
+- **Infrastructure as code:** new Azure Container Apps environments are in `infra/`; `azure_function/` and `terraform/` retain the older Azure Functions prototype. The active deployment guide uses `infra/`.
 - **Secrets:** no `.env`, API key, Terraform state, or plan belongs in Git. The Compose key is a local demo default only. Azure reads its worker key from Key Vault through a user-assigned managed identity.
 
 ## Azure
