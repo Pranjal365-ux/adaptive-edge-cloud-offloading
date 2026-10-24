@@ -6,8 +6,16 @@ resource "azurerm_user_assigned_identity" "worker" {
 }
 
 resource "azurerm_role_assignment" "read_worker_secret" {
+  count                = var.api_key_value == "" ? 1 : 0
   scope                = var.key_vault_id
   role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.worker.principal_id
+}
+
+resource "azurerm_role_assignment" "pull_image" {
+  count                = var.registry_id == "" ? 0 : 1
+  scope                = var.registry_id
+  role_definition_name = "AcrPull"
   principal_id         = azurerm_user_assigned_identity.worker.principal_id
 }
 
@@ -15,15 +23,32 @@ resource "azurerm_container_app" "worker" {
   name                         = var.name
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
-  revision_mode                = "Multiple"
+  revision_mode                = var.revision_mode
+  dynamic "registry" {
+    for_each = var.registry_server == "" ? [] : [var.registry_server]
+    content {
+      server   = registry.value
+      identity = azurerm_user_assigned_identity.worker.id
+    }
+  }
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.worker.id]
   }
-  secret {
-    name                = "worker-api-key"
-    key_vault_secret_id = var.api_key_secret_uri
-    identity            = azurerm_user_assigned_identity.worker.id
+  dynamic "secret" {
+    for_each = var.api_key_value != "" ? [true] : []
+    content {
+      name  = "worker-api-key"
+      value = var.api_key_value
+    }
+  }
+  dynamic "secret" {
+    for_each = var.api_key_value == "" ? [true] : []
+    content {
+      name                = "worker-api-key"
+      key_vault_secret_id = var.api_key_secret_uri
+      identity            = azurerm_user_assigned_identity.worker.id
+    }
   }
   ingress {
     external_enabled = true
@@ -73,5 +98,5 @@ resource "azurerm_container_app" "worker" {
     }
   }
   tags       = var.tags
-  depends_on = [azurerm_role_assignment.read_worker_secret]
+  depends_on = [azurerm_role_assignment.read_worker_secret, azurerm_role_assignment.pull_image]
 }

@@ -31,6 +31,8 @@ infra/**/*.tfstate*
 infra/**/*.tfplan
 infra/**/terraform.tfvars
 infra/**/terraform.tfvars.json
+infra/**/backend.hcl
+!*.backend.hcl.example
 build/
 dist/
 *.egg-info/

@@ -13,6 +13,7 @@ RUN python -m pip install --no-index --find-links=/wheels -r requirements-servic
     && rm -rf /wheels
 COPY offloader/ ./offloader/
 COPY services/cloud_worker.py ./services/cloud_worker.py
+COPY services/console.html ./services/console.html
 COPY services/__init__.py ./services/__init__.py
 USER app:app
 EXPOSE 8081

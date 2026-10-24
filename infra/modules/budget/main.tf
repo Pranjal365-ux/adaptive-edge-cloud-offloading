@@ -28,4 +28,7 @@ resource "azurerm_consumption_budget_resource_group" "main" {
     threshold_type = "Actual"
     contact_emails = [var.alert_email]
   }
+  lifecycle {
+    ignore_changes = [time_period]
+  }
 }

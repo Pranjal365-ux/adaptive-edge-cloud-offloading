@@ -2,7 +2,7 @@
 
 OffloadOps is a reproducible edge-to-cloud offloading project with a discrete-event simulator and a locally containerized service demo. It compares local-only, cloud-only, fixed-threshold, measured adaptive, and simulator-oracle policies. The console focuses on live image inspections, edge/cloud worker utilization, and network telemetry; the seeded simulator remains a separate evaluation tool.
 
-The approved course synopsis is [the project synopsis](docs/Adaptive_Task_Offloading_Synopsis.docx). Implementation and measurement boundaries are recorded in [the audit](docs/AUDIT.md), [decisions](docs/DECISIONS.md), and [verification log](docs/VERIFICATION.md).
+The approved course synopsis is [the project synopsis](docs/Adaptive_Task_Offloading_Synopsis.docx). Quick presentation notes for viva are in [the teacher walkthrough guide](docs/TEACHER_GUIDE.md). Implementation and measurement boundaries are recorded in [the audit](docs/AUDIT.md), [decisions](docs/DECISIONS.md), and [verification log](docs/VERIFICATION.md).
 
 ## Architecture
 

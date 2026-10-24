@@ -34,8 +34,8 @@ variable "cloud_worker_image" {
   type        = string
   description = "Public GHCR image for the cloud worker."
   validation {
-    condition     = startswith(var.cloud_worker_image, "ghcr.io/")
-    error_message = "Use a public GHCR image."
+    condition     = startswith(var.cloud_worker_image, "ghcr.io/") || can(regex("^[a-z0-9]+\\.azurecr\\.io/", var.cloud_worker_image))
+    error_message = "Use a GHCR image or a valid Azure Container Registry image."
   }
 }
 variable "api_key_secret_uri" {
@@ -78,4 +78,11 @@ variable "budget_amount_usd" {
 variable "tags" {
   type    = map(string)
   default = { managed_by = "terraform", project_type = "course-demo" }
+}
+
+variable "api_key_value" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Express-compatible app secret, supplied through TF_VAR_api_key_value."
 }

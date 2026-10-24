@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -111,6 +112,20 @@ async def correlation_and_access_log(request: Request, call_next):
 def require_key(value: str | None) -> None:
     if not value or not secrets.compare_digest(value, API_KEY):
         raise HTTPException(status_code=401, detail="invalid API key")
+
+
+@app.get("/")
+def index():
+    if os.path.exists("services/console.html"):
+        return FileResponse("services/console.html", media_type="text/html")
+    return {"service": "cloud-worker", "status": "running", "docs": "/docs", "ready": "/ready"}
+
+
+@app.get("/console")
+def console():
+    if os.path.exists("services/console.html"):
+        return FileResponse("services/console.html", media_type="text/html")
+    return {"service": "cloud-worker", "status": "running"}
 
 
 @app.get("/health")

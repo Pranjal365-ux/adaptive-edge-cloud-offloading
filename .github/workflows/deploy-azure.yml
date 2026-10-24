@@ -1,43 +1,70 @@
 name: Deploy cloud worker to Azure
 
 on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Immutable GHCR image tag, for example sha-<full 40-character commit SHA>
+        description: Existing immutable ACR tag for rollback, for example sha-<full-commit-sha>
         required: true
         type: string
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
-  group: azure-production-cloud-worker
+  group: azure-dev-cloud-worker
   cancel-in-progress: false
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     environment: azure-production
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - name: Validate deployment inputs
+      - name: Validate deployment configuration
+        id: config
         shell: bash
         env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_TAG: ${{ inputs.image_tag }}
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
           AZURE_CLOUD_APP_NAME: ${{ vars.AZURE_CLOUD_APP_NAME }}
+          AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
         run: |
           set -euo pipefail
-          [[ "$IMAGE_TAG" =~ ^sha-[0-9a-f]{40}$ ]] || { echo "Use a full immutable sha-<40-character commit> image tag."; exit 1; }
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZURE_CLOUD_APP_NAME; do
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            [[ "$CI_CONCLUSION" == "success" ]] || { echo "CI did not succeed."; exit 1; }
+            [[ "$CI_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "CI did not provide a full commit SHA."; exit 1; }
+            tag="sha-${CI_SHA}"
+            echo "build_image=true" >> "$GITHUB_OUTPUT"
+          else
+            [[ "$MANUAL_TAG" =~ ^sha-[0-9a-f]{40}$ ]] || { echo "Use an existing full immutable sha-<40-character commit> ACR tag."; exit 1; }
+            tag="$MANUAL_TAG"
+            echo "build_image=false" >> "$GITHUB_OUTPUT"
+          fi
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZURE_CLOUD_APP_NAME AZURE_ACR_NAME; do
             [[ -n "${!name}" ]] || { echo "Missing azure-production environment variable: $name"; exit 1; }
           done
+          echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tested commit
+        if: steps.config.outputs.build_image == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Sign in to Azure with GitHub OIDC
         uses: azure/login@v3
@@ -46,23 +73,35 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy immutable image to Container Apps
+      - name: Build and push immutable cloud worker image
+        if: steps.config.outputs.build_image == 'true'
         shell: bash
         env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
-          IMAGE_OWNER: ${{ github.repository_owner }}
-          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-          APP_NAME: ${{ vars.AZURE_CLOUD_APP_NAME }}
+          ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+          IMAGE_TAG: ${{ steps.config.outputs.image_tag }}
         run: |
           set -euo pipefail
-          owner="${IMAGE_OWNER,,}"
-          image="ghcr.io/${owner}/offloadops-cloud:${IMAGE_TAG}"
+          az acr login --name "$ACR_NAME"
+          image="$(az acr show --name "$ACR_NAME" --query loginServer --output tsv)/offloadops-cloud:${IMAGE_TAG}"
+          docker build --file cloud/Dockerfile --tag "$image" .
+          docker push "$image"
+
+      - name: Deploy and verify Container App revision
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.config.outputs.image_tag }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ vars.AZURE_CLOUD_APP_NAME }}
+          ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+        run: |
+          set -euo pipefail
+          login_server="$(az acr show --name "$ACR_NAME" --query loginServer --output tsv)"
+          image="${login_server}/offloadops-cloud:${IMAGE_TAG}"
           az containerapp update \
             --name "$APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --image "$image" \
             --output none
-
           revision="$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
             --query properties.latestRevisionName --output tsv)"
           [[ -n "$revision" ]] || { echo "Azure did not report a latest revision."; exit 1; }
@@ -83,7 +122,6 @@ jobs:
             fi
             sleep 10
           done
-
           fqdn="$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
             --query properties.configuration.ingress.fqdn --output tsv)"
           [[ -n "$fqdn" ]] || { echo "Container App has no external ingress FQDN."; exit 1; }

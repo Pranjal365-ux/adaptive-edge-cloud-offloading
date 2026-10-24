@@ -31,6 +31,15 @@ resource "azurerm_resource_group" "main" {
   tags     = local.tags
 }
 
+resource "azurerm_container_registry" "images" {
+  name                = replace(local.name, "-", "")
+  resource_group_name = azurerm_resource_group.main.name
+  location            = var.location
+  sku                 = "Basic"
+  admin_enabled       = false
+  tags                = local.tags
+}
+
 module "monitoring" {
   source              = "../../modules/monitoring"
   name                = local.name
@@ -66,7 +75,11 @@ module "cloud_worker" {
   container_app_environment_id           = module.container_app_env.id
   key_vault_id                           = module.keyvault.id
   api_key_secret_uri                     = var.api_key_secret_uri
+  api_key_value                          = var.api_key_value
+  revision_mode                          = "Single"
   image                                  = var.cloud_worker_image
+  registry_server                        = azurerm_container_registry.images.login_server
+  registry_id                            = azurerm_container_registry.images.id
   min_replicas                           = var.min_replicas
   max_replicas                           = var.max_replicas
   application_insights_connection_string = module.monitoring.application_insights_connection_string
@@ -92,9 +105,14 @@ resource "azurerm_monitor_metric_alert" "http_5xx" {
   criteria {
     metric_namespace = "Microsoft.App/containerApps"
     metric_name      = "Requests"
-    aggregation      = "Count"
+    aggregation      = "Total"
     operator         = "GreaterThan"
     threshold        = 10
+    dimension {
+      name     = "statusCodeCategory"
+      operator = "Include"
+      values   = ["5xx"]
+    }
   }
   action { action_group_id = module.monitoring.action_group_id }
   tags = local.tags
@@ -105,3 +123,4 @@ output "cloud_worker_url" {
   value       = "https://${module.cloud_worker.fqdn}"
   description = "Set this as AZURE_WORKER_URL after infrastructure is deployed."
 }
+output "container_registry_name" { value = azurerm_container_registry.images.name }

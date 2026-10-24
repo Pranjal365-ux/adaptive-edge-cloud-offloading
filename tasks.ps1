@@ -48,8 +48,15 @@ try {
             Start-Process 'http://localhost:8000/console'
         }
         'demo-azure' {
+            # Existing PowerShell windows do not inherit environment changes made after they started.
+            if (-not $env:AZURE_WORKER_URL) {
+                $env:AZURE_WORKER_URL = [Environment]::GetEnvironmentVariable('AZURE_WORKER_URL', 'User')
+            }
+            if (-not $env:CLOUD_API_KEY) {
+                $env:CLOUD_API_KEY = [Environment]::GetEnvironmentVariable('CLOUD_API_KEY', 'User')
+            }
             if (-not $env:AZURE_WORKER_URL) { throw 'Set AZURE_WORKER_URL to the deployed HTTPS worker URL.' }
-            if (-not $env:CLOUD_API_KEY) { throw 'Set CLOUD_API_KEY in this PowerShell session for the Azure worker.' }
+            if (-not $env:CLOUD_API_KEY) { throw 'Set CLOUD_API_KEY as a Windows user environment variable for the Azure worker.' }
             $env:CLOUD_URL = $env:AZURE_WORKER_URL
             Invoke-External 'docker' @('compose', 'up', '-d', '--build', '--wait')
             Start-Process 'http://localhost:8000/console'
