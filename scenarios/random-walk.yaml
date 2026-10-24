@@ -1,0 +1,1 @@
+{"name":"random-walk","seed":2026,"step_seconds":5,"bandwidth_min_kbps":64,"bandwidth_max_kbps":8192,"latency_min_ms":5,"latency_max_ms":500}

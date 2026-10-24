@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+scrape_configs:
+  - job_name: edge
+    metrics_path: /metrics
+    static_configs:
+      - targets: [edge:8080]
+  - job_name: cloud
+    metrics_path: /metrics
+    static_configs:
+      - targets: [cloud:8081]

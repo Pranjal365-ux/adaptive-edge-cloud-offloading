@@ -1,0 +1,1 @@
+{"name":"poor","toxics":[{"name":"latency","type":"latency","stream":"downstream","toxicity":1.0,"attributes":{"latency":300,"jitter":25}},{"name":"bandwidth","type":"bandwidth","stream":"downstream","toxicity":1.0,"attributes":{"rate":128}}]}

@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=75,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "offloadops"
+version = "0.2.0"
+description = "Reproducible edge-cloud task offloading simulator and operations demo"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "ruff==0.17.1",
+]
+live = [
+  "psutil==7.2.2",
+  "azure-functions==1.25.0",
+]
+services = [
+  "azure-monitor-opentelemetry==1.8.11",
+  "fastapi==0.158.1",
+  "httpx==0.28.1",
+  "prometheus-client==0.26.0",
+  "pydantic==2.14.1",
+  "uvicorn==0.54.0",
+]
+dashboard = [
+  "matplotlib==3.11.2",
+  "pandas==3.0.1",
+  "streamlit==1.55.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["offloader*"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
+addopts = "-ra"
+
+[tool.coverage.run]
+branch = true
+source = ["offloader"]
+omit = ["offloader/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [".venv", "terraform/.terraform", "temp_validation"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
