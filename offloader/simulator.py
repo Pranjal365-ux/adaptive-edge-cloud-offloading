@@ -3,6 +3,7 @@
 Run: python offloading.py --output results
 Python 3.10+; no third-party packages needed for simulation.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -10,11 +11,19 @@ import csv
 import heapq
 import json
 import random
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean
+
 from .costs import CostModel
-from .policies import AdaptiveObserved, AdaptiveOracle, CloudOnly, DecisionContext, EdgeOnly, Threshold
+from .policies import (
+    AdaptiveObserved,
+    AdaptiveOracle,
+    CloudOnly,
+    DecisionContext,
+    EdgeOnly,
+    Threshold,
+)
 from .stats import bootstrap_mean_ci, mean_std, nearest_rank, paired_mean_ci
 
 
@@ -96,8 +105,14 @@ class Resource:
 
 
 class Simulation:
-    def __init__(self, scenario: Scenario, tasks: list[Task], policy: str, threshold_mi: float,
-                 network_seed: int = 0):
+    def __init__(
+        self,
+        scenario: Scenario,
+        tasks: list[Task],
+        policy: str,
+        threshold_mi: float,
+        network_seed: int = 0,
+    ):
         self.scenario, self.tasks, self.policy = scenario, tasks, policy
         self.threshold_mi = threshold_mi
         self.resources = {
@@ -139,20 +154,33 @@ class Simulation:
         tick = max(0, int(now // self.network_step_seconds))
         while self.network_tick < tick:
             self.network_tick += 1
-            self.walk_bandwidth = min(100.0, max(1.0,
-                self.walk_bandwidth * (1.0 + self.network_rng.uniform(-0.25, 0.25))))
-            target_latency = self.scenario.latency_ms * (self.scenario.bandwidth_mbps / self.walk_bandwidth) ** 0.35
-            self.walk_latency = min(500.0, max(5.0,
-                0.7 * self.walk_latency + 0.3 * target_latency + self.network_rng.uniform(-5.0, 5.0)))
+            self.walk_bandwidth = min(
+                100.0, max(1.0, self.walk_bandwidth * (1.0 + self.network_rng.uniform(-0.25, 0.25)))
+            )
+            target_latency = (
+                self.scenario.latency_ms
+                * (self.scenario.bandwidth_mbps / self.walk_bandwidth) ** 0.35
+            )
+            self.walk_latency = min(
+                500.0,
+                max(
+                    5.0,
+                    0.7 * self.walk_latency
+                    + 0.3 * target_latency
+                    + self.network_rng.uniform(-5.0, 5.0),
+                ),
+            )
         return self.walk_bandwidth, self.walk_latency
 
     def network_at(self, now: float) -> tuple[float, float]:
         probe_tick = max(0, int(now // self.network_step_seconds))
         while self.last_probe_tick < probe_tick:
             self.last_probe_tick += 1
-            bandwidth, latency = self._actual_network_at(self.last_probe_tick * self.network_step_seconds)
-            self.measured_bandwidth_mbps = .8 * self.measured_bandwidth_mbps + .2 * bandwidth
-            self.measured_rtt_ms = .8 * self.measured_rtt_ms + .2 * latency
+            bandwidth, latency = self._actual_network_at(
+                self.last_probe_tick * self.network_step_seconds
+            )
+            self.measured_bandwidth_mbps = 0.8 * self.measured_bandwidth_mbps + 0.2 * bandwidth
+            self.measured_rtt_ms = 0.8 * self.measured_rtt_ms + 0.2 * latency
         return self._actual_network_at(now)
 
     def choose(self, task: Task) -> str:
@@ -170,7 +198,7 @@ class Simulation:
         s = self.scenario
         actual_bandwidth, actual_latency = self.network_at(self.now)
         if observable:
-            bandwidth = max(self.measured_bandwidth_mbps, .01)
+            bandwidth = max(self.measured_bandwidth_mbps, 0.01)
             latency_ms = self.measured_rtt_ms
             edge_service = task.work_mi * self.edge_ms_per_mi / 1000
             cloud_service = task.work_mi * self.cloud_ms_per_mi / 1000
@@ -192,12 +220,25 @@ class Simulation:
             upload_seconds = self.transfer_seconds(task.input_mb, self.now)
             download_seconds = self.transfer_seconds(task.output_mb, self.now)
         compute_seconds = cloud_service
-        cost = CostModel(s.cloud_usd_per_compute_second, s.cloud_usd_per_request,
-                         s.cloud_egress_usd_per_gb).estimate(compute_seconds, task.output_mb)
-        return DecisionContext(task.work_mi, task.input_mb, task.output_mb,
-            edge_service, compute_seconds, upload_seconds, download_seconds,
-            latency_ms / 1000, edge_wait, cloud_wait, upload_wait, download_wait,
-            cost, s.cost_weight_seconds_per_usd)
+        cost = CostModel(
+            s.cloud_usd_per_compute_second, s.cloud_usd_per_request, s.cloud_egress_usd_per_gb
+        ).estimate(compute_seconds, task.output_mb)
+        return DecisionContext(
+            task.work_mi,
+            task.input_mb,
+            task.output_mb,
+            edge_service,
+            compute_seconds,
+            upload_seconds,
+            download_seconds,
+            latency_ms / 1000,
+            edge_wait,
+            cloud_wait,
+            upload_wait,
+            download_wait,
+            cost,
+            s.cost_weight_seconds_per_usd,
+        )
 
     def _observed_wait(self, resource_name: str, expected_service_seconds: float) -> float:
         resource = self.resources[resource_name]
@@ -217,7 +258,9 @@ class Simulation:
         request_id, duration, next_stage, task = req
         # A queued transfer uses the link state when service actually starts.
         if name in ("upload", "download"):
-            duration = self.transfer_seconds(task.input_mb if name == "upload" else task.output_mb, self.now)
+            duration = self.transfer_seconds(
+                task.input_mb if name == "upload" else task.output_mb, self.now
+            )
         resource = self.resources[name]
         finish = self.now + duration
         self.service_started[request_id] = self.now
@@ -233,14 +276,19 @@ class Simulation:
                 task = data
                 destination = self.choose(task)
                 self.records[task.id] = {
-                    "task_id": task.id, "arrival_s": task.arrival,
-                    "work_mi": task.work_mi, "input_mb": task.input_mb,
-                    "output_mb": task.output_mb, "destination": destination,
+                    "task_id": task.id,
+                    "arrival_s": task.arrival,
+                    "work_mi": task.work_mi,
+                    "input_mb": task.input_mb,
+                    "output_mb": task.output_mb,
+                    "destination": destination,
                 }
                 if destination == "edge":
                     self.request("edge", task.work_mi / s.edge_mips, "finished", task)
                 else:
-                    self.request("upload", self.transfer_seconds(task.input_mb, self.now), "uploaded", task)
+                    self.request(
+                        "upload", self.transfer_seconds(task.input_mb, self.now), "uploaded", task
+                    )
             elif kind == "service_done":
                 name, request_id, next_stage, task = data
                 resource = self.resources[name]
@@ -249,7 +297,7 @@ class Simulation:
                 if name in ("edge", "cloud") and task.work_mi > 0:
                     observed_rate = elapsed * 1000 / task.work_mi
                     old_rate = self.edge_ms_per_mi if name == "edge" else self.cloud_ms_per_mi
-                    learned_rate = .8 * old_rate + .2 * observed_rate
+                    learned_rate = 0.8 * old_rate + 0.2 * observed_rate
                     if name == "edge":
                         self.edge_ms_per_mi = learned_rate
                     else:
@@ -262,7 +310,12 @@ class Simulation:
                     _, latency = self.network_at(self.now)
                     self.schedule(self.now + latency / 1000, "cloud_arrival", task)
                 elif next_stage == "computed":
-                    self.request("download", self.transfer_seconds(task.output_mb, self.now), "downloaded", task)
+                    self.request(
+                        "download",
+                        self.transfer_seconds(task.output_mb, self.now),
+                        "downloaded",
+                        task,
+                    )
                 elif next_stage == "downloaded":
                     _, latency = self.network_at(self.now)
                     self.schedule(self.now + latency / 1000, "finished_cloud", task)
@@ -277,17 +330,25 @@ class Simulation:
         for task in self.tasks:
             row = self.records[task.id]
             row["completion_s"] = row["finish_s"] - row["arrival_s"]
-            row["cloud_cost_usd"] = (CostModel(s.cloud_usd_per_compute_second,
-                s.cloud_usd_per_request, s.cloud_egress_usd_per_gb).estimate(
-                    task.work_mi / s.cloud_mips, task.output_mb)
-                if row["destination"] == "cloud" else 0.0)
-            row["network_mb"] = (task.input_mb + task.output_mb
-                                 if row["destination"] == "cloud" else 0.0)
+            row["cloud_cost_usd"] = (
+                CostModel(
+                    s.cloud_usd_per_compute_second,
+                    s.cloud_usd_per_request,
+                    s.cloud_egress_usd_per_gb,
+                ).estimate(task.work_mi / s.cloud_mips, task.output_mb)
+                if row["destination"] == "cloud"
+                else 0.0
+            )
+            row["network_mb"] = (
+                task.input_mb + task.output_mb if row["destination"] == "cloud" else 0.0
+            )
             rows.append(row)
         durations = sorted(row["completion_s"] for row in rows)
         horizon = max(row["finish_s"] for row in rows) - min(task.arrival for task in self.tasks)
         summary = {
-            "scenario": s.name, "policy": self.policy, "tasks": len(rows),
+            "scenario": s.name,
+            "policy": self.policy,
+            "tasks": len(rows),
             "mean_completion_s": mean(durations),
             "p95_completion_s": nearest_rank(durations, 0.95),
             "throughput_tasks_per_s": len(rows) / horizon,
@@ -316,7 +377,9 @@ def tune_threshold(count: int, seeds: list[int]) -> tuple[float, list[dict]]:
             trace = generate_tasks(seed, count, dev.arrival_rate)
             _, summary = Simulation(dev, trace, "threshold", threshold).run()
             measurements.append(summary["mean_completion_s"])
-        scores.append({"threshold_mi": threshold, "development_mean_completion_s": mean(measurements)})
+        scores.append(
+            {"threshold_mi": threshold, "development_mean_completion_s": mean(measurements)}
+        )
     chosen = min(scores, key=lambda x: (x["development_mean_completion_s"], x["threshold_mi"]))
     return chosen["threshold_mi"], scores
 
@@ -328,42 +391,71 @@ def write_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def aggregate_results(rows: list[dict], resamples: int, *, task_count: int,
-                      seeds: list[int], threshold: float) -> tuple[list[dict], list[dict], list[dict]]:
+def aggregate_results(
+    rows: list[dict], resamples: int, *, task_count: int, seeds: list[int], threshold: float
+) -> tuple[list[dict], list[dict], list[dict]]:
     """Create seed-level intervals, matched-policy deltas and cost sensitivity."""
     by_scenario_policy: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
         by_scenario_policy.setdefault((row["scenario"], row["policy"]), []).append(row)
-    metrics = ("mean_completion_s", "p95_completion_s", "throughput_tasks_per_s",
-               "edge_utilization", "network_mb", "cloud_cost_usd")
+    metrics = (
+        "mean_completion_s",
+        "p95_completion_s",
+        "throughput_tasks_per_s",
+        "edge_utilization",
+        "network_mb",
+        "cloud_cost_usd",
+    )
     aggregate = []
     for (scenario, policy), runs in sorted(by_scenario_policy.items()):
         output = {"scenario": scenario, "policy": policy, "seeds": len(runs)}
         for metric in metrics:
             values = [float(row[metric]) for row in runs]
             metric_mean, metric_std = mean_std(values)
-            low, high = bootstrap_mean_ci(values,
-                seed=sum(map(ord, scenario + policy + metric)), resamples=resamples)
-            output.update({f"{metric}_mean": metric_mean, f"{metric}_std": metric_std,
-                           f"{metric}_ci95_low": low, f"{metric}_ci95_high": high})
+            low, high = bootstrap_mean_ci(
+                values, seed=sum(map(ord, scenario + policy + metric)), resamples=resamples
+            )
+            output.update(
+                {
+                    f"{metric}_mean": metric_mean,
+                    f"{metric}_std": metric_std,
+                    f"{metric}_ci95_low": low,
+                    f"{metric}_ci95_high": high,
+                }
+            )
         aggregate.append(output)
     paired = []
     for scenario in SCENARIOS:
-        policy_runs = {policy: {row["seed"]: row for row in runs}
-            for (name, policy), runs in by_scenario_policy.items() if name == scenario.name}
+        policy_runs = {
+            policy: {row["seed"]: row for row in runs}
+            for (name, policy), runs in by_scenario_policy.items()
+            if name == scenario.name
+        }
         for baseline in ("edge_only", "cloud_only", "threshold"):
-            common = sorted(set(policy_runs.get("adaptive", {})) & set(policy_runs.get(baseline, {})))
+            common = sorted(
+                set(policy_runs.get("adaptive", {})) & set(policy_runs.get(baseline, {}))
+            )
             if not common:
                 continue
-            output = {"scenario": scenario.name, "comparison": f"adaptive - {baseline}",
-                      "seeds": len(common)}
+            output = {
+                "scenario": scenario.name,
+                "comparison": f"adaptive - {baseline}",
+                "seeds": len(common),
+            }
             for metric in metrics:
                 delta, low, high = paired_mean_ci(
                     [float(policy_runs["adaptive"][seed][metric]) for seed in common],
                     [float(policy_runs[baseline][seed][metric]) for seed in common],
-                    seed=sum(map(ord, scenario.name + baseline + metric)), resamples=resamples)
-                output.update({f"{metric}_delta_mean": delta,
-                    f"{metric}_delta_ci95_low": low, f"{metric}_delta_ci95_high": high})
+                    seed=sum(map(ord, scenario.name + baseline + metric)),
+                    resamples=resamples,
+                )
+                output.update(
+                    {
+                        f"{metric}_delta_mean": delta,
+                        f"{metric}_delta_ci95_low": low,
+                        f"{metric}_delta_ci95_high": high,
+                    }
+                )
             paired.append(output)
     cost_sweep = []
     for weight in (0.0, 100.0, 1_000.0, 10_000.0):
@@ -371,10 +463,10 @@ def aggregate_results(rows: list[dict], resamples: int, *, task_count: int,
             weighted = Scenario(**{**asdict(scenario), "cost_weight_seconds_per_usd": weight})
             for seed in seeds:
                 trace = generate_tasks(seed, task_count, weighted.arrival_rate)
-                _, summary = Simulation(weighted, trace, "adaptive", threshold,
-                                        network_seed=seed).run()
-                cost_sweep.append({"cost_weight_seconds_per_usd": weight,
-                                   "seed": seed, **summary})
+                _, summary = Simulation(
+                    weighted, trace, "adaptive", threshold, network_seed=seed
+                ).run()
+                cost_sweep.append({"cost_weight_seconds_per_usd": weight, "seed": seed, **summary})
     return aggregate, paired, cost_sweep
 
 
@@ -383,8 +475,12 @@ def main() -> None:
     parser.add_argument("--output", default="results", help="Output directory")
     parser.add_argument("--tasks", type=int, default=300, help="Tasks per scenario and seed")
     parser.add_argument("--seeds", type=int, default=20, help="Final repetitions")
-    parser.add_argument("--bootstrap-resamples", type=int, default=2000,
-                        help="Seeded paired bootstrap draws for aggregate confidence intervals")
+    parser.add_argument(
+        "--bootstrap-resamples",
+        type=int,
+        default=2000,
+        help="Seeded paired bootstrap draws for aggregate confidence intervals",
+    )
     args = parser.parse_args()
     if args.tasks < 20 or args.seeds < 1 or args.bootstrap_resamples < 1:
         parser.error("Use at least 20 tasks, one seed and one bootstrap resample")
@@ -398,38 +494,69 @@ def main() -> None:
         for seed in final_seeds:
             trace = generate_tasks(seed, args.tasks, scenario.arrival_rate)
             for policy in POLICIES:
-                rows, summary = Simulation(scenario, trace, policy, threshold,
-                                           network_seed=seed).run()
+                rows, summary = Simulation(
+                    scenario, trace, policy, threshold, network_seed=seed
+                ).run()
                 summary["seed"] = seed
                 all_summaries.append(summary)
                 for row in rows:
-                    all_tasks.append({"scenario": scenario.name, "seed": seed, "policy": policy, **row})
+                    all_tasks.append(
+                        {"scenario": scenario.name, "seed": seed, "policy": policy, **row}
+                    )
     write_csv(output / "summary.csv", all_summaries)
     write_csv(output / "tasks.csv", all_tasks)
-    aggregate, paired, cost_sweep = aggregate_results(all_summaries,
-        args.bootstrap_resamples, task_count=args.tasks, seeds=final_seeds, threshold=threshold)
+    aggregate, paired, cost_sweep = aggregate_results(
+        all_summaries,
+        args.bootstrap_resamples,
+        task_count=args.tasks,
+        seeds=final_seeds,
+        threshold=threshold,
+    )
     write_csv(output / "aggregate.csv", aggregate)
     write_csv(output / "paired.csv", paired)
     write_csv(output / "cost_sweep.csv", cost_sweep)
     metadata = {
-        "model": "FIFO discrete event simulator; separate upload/download links; two one-way latency delays",
+        "model": (
+            "FIFO discrete event simulator; separate upload/download links; "
+            "two one-way latency delays"
+        ),
         "scenarios": [asdict(s) for s in SCENARIOS],
-        "development_seeds": development_seeds, "final_seeds": final_seeds,
+        "development_seeds": development_seeds,
+        "final_seeds": final_seeds,
         "tasks_per_scenario_seed": args.tasks,
         "threshold_selection": "minimum mean completion time on separate development runs",
-        "threshold_candidates": tuning, "selected_threshold_mi": threshold,
-        "adaptive_rule": "simulator-only oracle: predicted cloud completion + cost weight times estimated cloud cost < predicted edge completion",
-        "network_models": "constant, periodic good/poor, and seeded bounded random walk at five-second ticks",
-        "cost_model": "synthetic CPU-second, request and egress inputs; not an Azure invoice estimate; verify against current pricing",
-        "confidence_intervals": "seeded percentile bootstrap of run means; paired.csv preserves matched seeds",
+        "threshold_candidates": tuning,
+        "selected_threshold_mi": threshold,
+        "adaptive_rule": (
+            "simulator-only oracle: predicted cloud completion + cost weight "
+            "times estimated cloud cost < predicted edge completion"
+        ),
+        "network_models": (
+            "constant, periodic good/poor, and seeded bounded random walk at five-second ticks"
+        ),
+        "cost_model": (
+            "synthetic CPU-second, request and egress inputs; not an Azure invoice estimate; "
+            "verify against current pricing"
+        ),
+        "confidence_intervals": (
+            "seeded percentile bootstrap of run means; paired.csv preserves matched seeds"
+        ),
         "bootstrap_resamples": args.bootstrap_resamples,
-        "units": {"work": "million instructions", "processing_rate": "million instructions per second",
-                  "input_output": "MB (decimal)", "bandwidth": "megabits per second", "time": "seconds"},
+        "units": {
+            "work": "million instructions",
+            "processing_rate": "million instructions per second",
+            "input_output": "MB (decimal)",
+            "bandwidth": "megabits per second",
+            "time": "seconds",
+        },
     }
     (output / "experiment.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(f"Selected fixed threshold: {threshold:.2f} million instructions")
     print(f"Saved {len(all_summaries)} runs and {len(all_tasks)} task records to {output}")
-    print(f"Also wrote {len(aggregate)} aggregate rows, {len(paired)} paired comparisons and {len(cost_sweep)} cost-sensitivity rows")
+    print(
+        f"Also wrote {len(aggregate)} aggregate rows, {len(paired)} paired comparisons "
+        f"and {len(cost_sweep)} cost-sensitivity rows"
+    )
 
 
 if __name__ == "__main__":

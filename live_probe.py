@@ -3,6 +3,7 @@
 Set AZURE_FUNCTION_KEY in your shell, then run:
 python live_probe.py --url https://YOUR_APP.azurewebsites.net/api/compute
 """
+
 import argparse
 import csv
 import importlib.util
@@ -25,21 +26,32 @@ def run_probe(url, key, payload):
     local = workload.compute(payload)
     edge_wall_ms = (time.perf_counter() - edge_start) * 1000
     request = urllib.request.Request(
-        url, data=json.dumps(payload).encode("utf-8"), method="POST",
-        headers={"Content-Type": "application/json", "x-functions-key": key})
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json", "x-functions-key": key},
+    )
     cloud_start = time.perf_counter()
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
             remote = json.load(response)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Function returned HTTP {exc.code}: {exc.read(300).decode('utf-8', 'replace')}") from exc
+        raise RuntimeError(
+            f"Function returned HTTP {exc.code}: {exc.read(300).decode('utf-8', 'replace')}"
+        ) from exc
     cloud_wall_ms = (time.perf_counter() - cloud_start) * 1000
     if remote.get("digest") != local["digest"]:
         raise RuntimeError("Edge and cloud returned different results")
-    return {"iterations": payload["iterations"], "input_bytes": len(payload["data"].encode()),
-            "edge_wall_ms": edge_wall_ms, "edge_compute_ms": local["compute_ms"],
-            "cloud_wall_ms": cloud_wall_ms, "cloud_compute_ms": remote["compute_ms"],
-            "cloud_overhead_ms": cloud_wall_ms - remote["compute_ms"], "digests_match": True}
+    return {
+        "iterations": payload["iterations"],
+        "input_bytes": len(payload["data"].encode()),
+        "edge_wall_ms": edge_wall_ms,
+        "edge_compute_ms": local["compute_ms"],
+        "cloud_wall_ms": cloud_wall_ms,
+        "cloud_compute_ms": remote["compute_ms"],
+        "cloud_overhead_ms": cloud_wall_ms - remote["compute_ms"],
+        "digests_match": True,
+    }
 
 
 def main():
@@ -49,18 +61,25 @@ def main():
     args = parser.parse_args()
     key = os.environ.get("AZURE_FUNCTION_KEY")
     if not key:
-        sys.exit("Set AZURE_FUNCTION_KEY to the function key; see README. Do not put it on the command line.")
-    jobs = [{"iterations": 10000, "data": "a" * 1024},
-            {"iterations": 50000, "data": "b" * 16384},
-            {"iterations": 100000, "data": "c" * 65536}]
+        sys.exit(
+            "Set AZURE_FUNCTION_KEY to the function key; see README. "
+            "Do not put it on the command line."
+        )
+    jobs = [
+        {"iterations": 10000, "data": "a" * 1024},
+        {"iterations": 50000, "data": "b" * 16384},
+        {"iterations": 100000, "data": "c" * 65536},
+    ]
     rows = []
     for job in jobs:
         for repetition in range(3):
             row = run_probe(args.url, key, job)
             row["repetition"] = repetition + 1
             rows.append(row)
-            print(f"{row['iterations']:6d} iterations: edge {row['edge_wall_ms']:.1f} ms, "
-                  f"cloud round trip {row['cloud_wall_ms']:.1f} ms")
+            print(
+                f"{row['iterations']:6d} iterations: edge {row['edge_wall_ms']:.1f} ms, "
+                f"cloud round trip {row['cloud_wall_ms']:.1f} ms"
+            )
     with Path(args.output).open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()

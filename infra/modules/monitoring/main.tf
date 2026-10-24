@@ -9,14 +9,14 @@ resource "azurerm_log_analytics_workspace" "main" {
 }
 
 resource "azurerm_application_insights" "main" {
-  name                = "${var.name}-appi"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  workspace_id        = azurerm_log_analytics_workspace.main.id
-  application_type    = "web"
-  retention_in_days   = 30
+  name                 = "${var.name}-appi"
+  location             = var.location
+  resource_group_name  = var.resource_group_name
+  workspace_id         = azurerm_log_analytics_workspace.main.id
+  application_type     = "web"
+  retention_in_days    = 30
   daily_data_cap_in_gb = 1
-  tags                = var.tags
+  tags                 = var.tags
 }
 
 resource "azurerm_monitor_action_group" "email" {

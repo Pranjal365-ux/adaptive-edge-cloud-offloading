@@ -4,18 +4,28 @@ from pathlib import Path
 from unittest.mock import patch
 
 from offloader.costs import CostModel
-from offloader.policies import AdaptiveOracle, DecisionContext, EdgeOnly, CloudOnly, Threshold
+from offloader.policies import AdaptiveOracle, CloudOnly, DecisionContext, EdgeOnly, Threshold
 from offloader.stats import bootstrap_mean_ci, mean_std, nearest_rank, paired_mean_ci
 from offloading import Scenario, Simulation, Task
 
 
 def context(**changes):
-    values = dict(work_mi=100, input_mb=0.1, output_mb=0.01,
-        edge_service_seconds=1, cloud_service_seconds=0.1, upload_seconds=0.01,
-        download_seconds=0.001, one_way_latency_seconds=0.01,
-        edge_wait_seconds=0, cloud_wait_seconds=0, upload_wait_seconds=0,
-        download_wait_seconds=0, cloud_cost_usd=0.0001,
-        cost_weight_seconds_per_usd=100)
+    values = dict(
+        work_mi=100,
+        input_mb=0.1,
+        output_mb=0.01,
+        edge_service_seconds=1,
+        cloud_service_seconds=0.1,
+        upload_seconds=0.01,
+        download_seconds=0.001,
+        one_way_latency_seconds=0.01,
+        edge_wait_seconds=0,
+        cloud_wait_seconds=0,
+        upload_wait_seconds=0,
+        download_wait_seconds=0,
+        cloud_cost_usd=0.0001,
+        cost_weight_seconds_per_usd=100,
+    )
     values.update(changes)
     return DecisionContext(**values)
 
@@ -29,9 +39,11 @@ class PackageTests(unittest.TestCase):
 
     def test_nearest_rank_and_seeded_bootstrap(self):
         values = list(range(1, 22))
-        self.assertEqual(nearest_rank(values, .95), 20)
-        self.assertEqual(bootstrap_mean_ci(values, seed=7, resamples=500),
-                         bootstrap_mean_ci(values, seed=7, resamples=500))
+        self.assertEqual(nearest_rank(values, 0.95), 20)
+        self.assertEqual(
+            bootstrap_mean_ci(values, seed=7, resamples=500),
+            bootstrap_mean_ci(values, seed=7, resamples=500),
+        )
         self.assertEqual(mean_std([4]), (4, 0))
 
     def test_paired_ci_retains_pairing_and_direction(self):
@@ -45,18 +57,19 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(Threshold(100).choose(context()), "edge")
         self.assertEqual(Threshold(99).choose(context()), "cloud")
         self.assertEqual(AdaptiveOracle().choose(context()), "cloud")
-        self.assertEqual(AdaptiveOracle().choose(context(
-            one_way_latency_seconds=3, cloud_cost_usd=1)), "edge")
+        self.assertEqual(
+            AdaptiveOracle().choose(context(one_way_latency_seconds=3, cloud_cost_usd=1)), "edge"
+        )
 
     def test_cost_model_validates_and_accounts_components(self):
-        costs = CostModel(.1, .02, .5)
-        self.assertAlmostEqual(costs.estimate(2, 1000), .72)
+        costs = CostModel(0.1, 0.02, 0.5)
+        self.assertAlmostEqual(costs.estimate(2, 1000), 0.72)
         with self.assertRaises(ValueError):
             costs.estimate(-1, 0)
 
     def test_random_walk_is_seeded_and_changes_over_time(self):
         scenario = Scenario("walk", 1, 40, 60, random_walk_network=True)
-        task = [Task(0, 30, 1, .1, .01)]
+        task = [Task(0, 30, 1, 0.1, 0.01)]
         first = Simulation(scenario, task, "edge_only", 100, network_seed=19)
         second = Simulation(scenario, task, "edge_only", 100, network_seed=19)
         at_start = first.network_at(0)
@@ -65,7 +78,7 @@ class PackageTests(unittest.TestCase):
         self.assertNotEqual(at_start, at_end)
 
     def test_observed_adaptive_ignores_unmeasured_current_link(self):
-        task = [Task(0, 0, 1500, .01, .01)]
+        task = [Task(0, 0, 1500, 0.01, 0.01)]
         scenario = Scenario("changing", 1, 80, 10)
         sim = Simulation(scenario, task, "adaptive", 0)
         sim.measured_rtt_ms = 10_000

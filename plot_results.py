@@ -1,4 +1,5 @@
 """Create report-ready comparison plots from summary.csv (requires matplotlib)."""
+
 import argparse
 import csv
 from collections import defaultdict
@@ -16,7 +17,9 @@ def main():
     try:
         import matplotlib.pyplot as plt
     except ImportError as exc:
-        raise SystemExit("Install matplotlib to generate figures: python -m pip install matplotlib") from exc
+        raise SystemExit(
+            "Install matplotlib to generate figures: python -m pip install matplotlib"
+        ) from exc
     policies = ["edge_only", "cloud_only", "threshold", "adaptive"]
     scenarios = list(dict.fromkeys(r["scenario"] for r in rows))
     grouped = defaultdict(list)
@@ -31,8 +34,12 @@ def main():
         width = 0.19
         for j, policy in enumerate(policies):
             values = [mean(float(r[metric]) for r in grouped[(s, policy)]) for s in scenarios]
-            ax.bar([i + (j - 1.5) * width for i in range(len(scenarios))], values,
-                   width=width, label=policy.replace("_", " "))
+            ax.bar(
+                [i + (j - 1.5) * width for i in range(len(scenarios))],
+                values,
+                width=width,
+                label=policy.replace("_", " "),
+            )
         ax.set_xticks(range(len(scenarios)), [s.replace("_", "\n") for s in scenarios])
         ax.set_ylabel(title)
         if metric != "cloud_cost_usd":

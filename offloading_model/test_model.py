@@ -1,4 +1,5 @@
 """Small behavioral checks for the simulator. Run: python -m unittest -v."""
+
 import unittest
 from dataclasses import replace
 
@@ -20,8 +21,9 @@ class OffloadingTests(unittest.TestCase):
         for policy, expected in (("edge_only", "edge"), ("cloud_only", "cloud")):
             rows, summary = Simulation(self.scenario, self.tasks, policy, 300).run()
             self.assertEqual(len(rows), len(self.tasks))
-            self.assertTrue(all(r["destination"] == expected and
-                                r["finish_s"] >= r["arrival_s"] for r in rows))
+            self.assertTrue(
+                all(r["destination"] == expected and r["finish_s"] >= r["arrival_s"] for r in rows)
+            )
             self.assertEqual(summary["tasks"], len(self.tasks))
             self.assertLessEqual(summary["edge_utilization"], 1.000001)
             if policy == "edge_only":
@@ -32,7 +34,9 @@ class OffloadingTests(unittest.TestCase):
         task = [Task(0, 1.0, 100, 0.2, 0.02)]
         fast = replace(self.scenario, bandwidth_mbps=100, latency_ms=1)
         slow = replace(self.scenario, bandwidth_mbps=1, latency_ms=2000)
-        self.assertEqual(Simulation(fast, task, "adaptive", 300).run()[0][0]["destination"], "cloud")
+        self.assertEqual(
+            Simulation(fast, task, "adaptive", 300).run()[0][0]["destination"], "cloud"
+        )
         self.assertEqual(Simulation(slow, task, "adaptive", 300).run()[0][0]["destination"], "edge")
 
     def test_threshold_tuning_produces_candidate_and_value(self):

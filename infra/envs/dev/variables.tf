@@ -1,6 +1,6 @@
 variable "subscription_id" {
   type        = string
-  description = "Azure subscription GUID; supply through a private tfvars file or environment." 
+  description = "Azure subscription GUID; supply through a private tfvars file or environment."
   validation {
     condition     = can(regex("^[0-9a-fA-F-]{36}$", var.subscription_id))
     error_message = "subscription_id must be a GUID."
@@ -76,6 +76,6 @@ variable "budget_amount_usd" {
   default = 100
 }
 variable "tags" {
-  type = map(string)
+  type    = map(string)
   default = { managed_by = "terraform", project_type = "course-demo" }
 }

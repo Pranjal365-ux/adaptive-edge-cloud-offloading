@@ -41,17 +41,17 @@ module "monitoring" {
 }
 
 module "container_app_env" {
-  source                    = "../../modules/container_app_env"
-  name                      = "cae-${local.name}"
-  location                  = var.location
-  resource_group_name       = azurerm_resource_group.main.name
+  source                     = "../../modules/container_app_env"
+  name                       = "cae-${local.name}"
+  location                   = var.location
+  resource_group_name        = azurerm_resource_group.main.name
   log_analytics_workspace_id = module.monitoring.workspace_id
-  tags                      = local.tags
+  tags                       = local.tags
 }
 
 module "keyvault" {
   source              = "../../modules/keyvault"
-  name                = "kv${replace(local.name, "-", "")}" 
+  name                = "kv${replace(local.name, "-", "")}"
   location            = var.location
   resource_group_name = azurerm_resource_group.main.name
   tenant_id           = var.tenant_id
@@ -59,26 +59,26 @@ module "keyvault" {
 }
 
 module "cloud_worker" {
-  source                               = "../../modules/cloud_worker"
-  name                                 = "ca-${local.name}-cloud"
-  location                             = var.location
-  resource_group_name                  = azurerm_resource_group.main.name
-  container_app_environment_id        = module.container_app_env.id
-  key_vault_id                         = module.keyvault.id
-  api_key_secret_uri                   = var.api_key_secret_uri
-  image                                = var.cloud_worker_image
-  min_replicas                         = var.min_replicas
-  max_replicas                         = var.max_replicas
+  source                                 = "../../modules/cloud_worker"
+  name                                   = "ca-${local.name}-cloud"
+  location                               = var.location
+  resource_group_name                    = azurerm_resource_group.main.name
+  container_app_environment_id           = module.container_app_env.id
+  key_vault_id                           = module.keyvault.id
+  api_key_secret_uri                     = var.api_key_secret_uri
+  image                                  = var.cloud_worker_image
+  min_replicas                           = var.min_replicas
+  max_replicas                           = var.max_replicas
   application_insights_connection_string = module.monitoring.application_insights_connection_string
-  tags                                 = local.tags
+  tags                                   = local.tags
 }
 
 module "budget" {
-  source           = "../../modules/budget"
-  name             = "${local.name}-budget"
+  source            = "../../modules/budget"
+  name              = "${local.name}-budget"
   resource_group_id = azurerm_resource_group.main.id
-  amount_usd       = var.budget_amount_usd
-  alert_email      = var.alert_email
+  amount_usd        = var.budget_amount_usd
+  alert_email       = var.alert_email
 }
 
 resource "azurerm_monitor_metric_alert" "http_5xx" {

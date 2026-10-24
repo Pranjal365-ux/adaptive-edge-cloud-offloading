@@ -55,15 +55,15 @@ resource "azurerm_container_app" "worker" {
         value = var.application_insights_connection_string
       }
       liveness_probe {
-        transport = "HTTP"
-        port      = 8081
-        path      = "/health"
+        transport        = "HTTP"
+        port             = 8081
+        path             = "/health"
         interval_seconds = 30
       }
       readiness_probe {
-        transport = "HTTP"
-        port      = 8081
-        path      = "/ready"
+        transport        = "HTTP"
+        port             = 8081
+        path             = "/ready"
         interval_seconds = 10
       }
     }
@@ -72,6 +72,6 @@ resource "azurerm_container_app" "worker" {
       concurrent_requests = "20"
     }
   }
-  tags = var.tags
+  tags       = var.tags
   depends_on = [azurerm_role_assignment.read_worker_secret]
 }

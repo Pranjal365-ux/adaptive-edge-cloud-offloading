@@ -3,6 +3,7 @@
 Run: python offloading.py --output results
 Python 3.10+; no third-party packages needed for simulation.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -10,7 +11,7 @@ import csv
 import heapq
 import json
 import random
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean
 
@@ -160,14 +161,19 @@ class Simulation:
                 task = data
                 destination = self.choose(task)
                 self.records[task.id] = {
-                    "task_id": task.id, "arrival_s": task.arrival,
-                    "work_mi": task.work_mi, "input_mb": task.input_mb,
-                    "output_mb": task.output_mb, "destination": destination,
+                    "task_id": task.id,
+                    "arrival_s": task.arrival,
+                    "work_mi": task.work_mi,
+                    "input_mb": task.input_mb,
+                    "output_mb": task.output_mb,
+                    "destination": destination,
                 }
                 if destination == "edge":
                     self.request("edge", task.work_mi / s.edge_mips, "finished", task)
                 else:
-                    self.request("upload", self.transfer_seconds(task.input_mb, self.now), "uploaded", task)
+                    self.request(
+                        "upload", self.transfer_seconds(task.input_mb, self.now), "uploaded", task
+                    )
             elif kind == "service_done":
                 name, request_id, next_stage, task = data
                 resource = self.resources[name]
@@ -180,7 +186,12 @@ class Simulation:
                     _, latency = s.network_at(self.now)
                     self.schedule(self.now + latency / 1000, "cloud_arrival", task)
                 elif next_stage == "computed":
-                    self.request("download", self.transfer_seconds(task.output_mb, self.now), "downloaded", task)
+                    self.request(
+                        "download",
+                        self.transfer_seconds(task.output_mb, self.now),
+                        "downloaded",
+                        task,
+                    )
                 elif next_stage == "downloaded":
                     _, latency = s.network_at(self.now)
                     self.schedule(self.now + latency / 1000, "finished_cloud", task)
@@ -195,15 +206,21 @@ class Simulation:
         for task in self.tasks:
             row = self.records[task.id]
             row["completion_s"] = row["finish_s"] - row["arrival_s"]
-            row["cloud_cost_usd"] = (task.work_mi / s.cloud_mips * s.cloud_usd_per_compute_second
-                                     if row["destination"] == "cloud" else 0.0)
-            row["network_mb"] = (task.input_mb + task.output_mb
-                                 if row["destination"] == "cloud" else 0.0)
+            row["cloud_cost_usd"] = (
+                task.work_mi / s.cloud_mips * s.cloud_usd_per_compute_second
+                if row["destination"] == "cloud"
+                else 0.0
+            )
+            row["network_mb"] = (
+                task.input_mb + task.output_mb if row["destination"] == "cloud" else 0.0
+            )
             rows.append(row)
         durations = sorted(row["completion_s"] for row in rows)
         horizon = max(row["finish_s"] for row in rows) - min(task.arrival for task in self.tasks)
         summary = {
-            "scenario": s.name, "policy": self.policy, "tasks": len(rows),
+            "scenario": s.name,
+            "policy": self.policy,
+            "tasks": len(rows),
             "mean_completion_s": mean(durations),
             "p95_completion_s": durations[max(0, int(0.95 * len(durations)) - 1)],
             "throughput_tasks_per_s": len(rows) / horizon,
@@ -233,7 +250,9 @@ def tune_threshold(count: int, seeds: list[int]) -> tuple[float, list[dict]]:
             trace = generate_tasks(seed, count, dev.arrival_rate)
             _, summary = Simulation(dev, trace, "threshold", threshold).run()
             measurements.append(summary["mean_completion_s"])
-        scores.append({"threshold_mi": threshold, "development_mean_completion_s": mean(measurements)})
+        scores.append(
+            {"threshold_mi": threshold, "development_mean_completion_s": mean(measurements)}
+        )
     chosen = min(scores, key=lambda x: (x["development_mean_completion_s"], x["threshold_mi"]))
     return chosen["threshold_mi"], scores
 
@@ -267,23 +286,40 @@ def main() -> None:
                 summary["seed"] = seed
                 all_summaries.append(summary)
                 for row in rows:
-                    all_tasks.append({"scenario": scenario.name, "seed": seed, "policy": policy, **row})
+                    all_tasks.append(
+                        {"scenario": scenario.name, "seed": seed, "policy": policy, **row}
+                    )
     write_csv(output / "summary.csv", all_summaries)
     write_csv(output / "tasks.csv", all_tasks)
     metadata = {
-        "model": "FIFO discrete event simulator; separate upload/download links; two one-way latency delays",
+        "model": (
+            "FIFO discrete event simulator; separate upload/download links; "
+            "two one-way latency delays"
+        ),
         "scenarios": [asdict(s) for s in SCENARIOS],
-        "development_seeds": development_seeds, "final_seeds": final_seeds,
+        "development_seeds": development_seeds,
+        "final_seeds": final_seeds,
         "tasks_per_scenario_seed": args.tasks,
         "threshold_selection": "minimum mean completion time on separate development runs",
-        "threshold_candidates": tuning, "selected_threshold_mi": threshold,
-        "adaptive_rule": "predicted cloud completion + cost weight times estimated cloud cost < predicted edge completion",
-        "units": {"work": "million instructions", "processing_rate": "million instructions per second",
-                  "input_output": "MB (decimal)", "bandwidth": "megabits per second", "time": "seconds"},
+        "threshold_candidates": tuning,
+        "selected_threshold_mi": threshold,
+        "adaptive_rule": (
+            "predicted cloud completion + cost weight times estimated cloud cost "
+            "< predicted edge completion"
+        ),
+        "units": {
+            "work": "million instructions",
+            "processing_rate": "million instructions per second",
+            "input_output": "MB (decimal)",
+            "bandwidth": "megabits per second",
+            "time": "seconds",
+        },
     }
     (output / "experiment.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(f"Selected fixed threshold: {threshold:.2f} million instructions")
-    print(f"Saved {len(all_summaries)} runs and {len(all_tasks)} task records to {output.resolve()}")
+    print(
+        f"Saved {len(all_summaries)} runs and {len(all_tasks)} task records to {output.resolve()}"
+    )
 
 
 if __name__ == "__main__":

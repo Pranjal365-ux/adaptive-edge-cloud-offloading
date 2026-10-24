@@ -1,4 +1,5 @@
 """Optional interactive dashboard. Run: streamlit run dashboard.py"""
+
 import csv
 import json
 import subprocess
@@ -20,9 +21,19 @@ with st.sidebar:
 
 if run:
     with st.spinner("Running simulation"):
-        subprocess.run([sys.executable, str(ROOT / "offloading.py"),
-                        "--tasks", str(task_count), "--seeds", str(seeds),
-                        "--output", str(RESULTS)], check=True)
+        subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "offloading.py"),
+                "--tasks",
+                str(task_count),
+                "--seeds",
+                str(seeds),
+                "--output",
+                str(RESULTS),
+            ],
+            check=True,
+        )
 
 if not (RESULTS / "summary.csv").exists():
     st.info("Choose the experiment size and run the simulation.")
@@ -30,7 +41,9 @@ if not (RESULTS / "summary.csv").exists():
 
 with (RESULTS / "experiment.json").open(encoding="utf-8") as f:
     experiment = json.load(f)
-st.write(f"Fixed baseline threshold: **{experiment['selected_threshold_mi']:.2f} million instructions**")
+st.write(
+    f"Fixed baseline threshold: **{experiment['selected_threshold_mi']:.2f} million instructions**"
+)
 with (RESULTS / "summary.csv").open(newline="", encoding="utf-8") as f:
     summaries = list(csv.DictReader(f))
 scenarios = list(dict.fromkeys(r["scenario"] for r in summaries))
@@ -41,8 +54,15 @@ except ImportError:
     st.error("Install pandas for the dashboard: python -m pip install pandas")
     st.stop()
 df = pd.DataFrame([r for r in summaries if r["scenario"] == selected])
-metrics = ["mean_completion_s", "p95_completion_s", "throughput_tasks_per_s",
-           "edge_utilization", "network_mb", "cloud_cost_usd", "cloud_task_fraction"]
+metrics = [
+    "mean_completion_s",
+    "p95_completion_s",
+    "throughput_tasks_per_s",
+    "edge_utilization",
+    "network_mb",
+    "cloud_cost_usd",
+    "cloud_task_fraction",
+]
 df[metrics] = df[metrics].astype(float)
 averages = df.groupby("policy", sort=False)[metrics].mean()
 st.subheader("Completion time by policy")

@@ -1,4 +1,5 @@
 """Small, testable destination-selection policies for the simulator."""
+
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -52,27 +53,41 @@ class Threshold:
 
 class AdaptiveOracle:
     """Simulation-only policy: uses exact queued service estimates available to the model."""
+
     name = "adaptive_oracle"
 
     def choose(self, context: DecisionContext) -> str:
         edge = context.edge_wait_seconds + context.edge_service_seconds
-        cloud = (context.upload_wait_seconds + context.upload_seconds
-                 + context.one_way_latency_seconds + context.cloud_wait_seconds
-                 + context.cloud_service_seconds + context.download_wait_seconds
-                 + context.download_seconds + context.one_way_latency_seconds
-                 + context.cost_weight_seconds_per_usd * context.cloud_cost_usd)
+        cloud = (
+            context.upload_wait_seconds
+            + context.upload_seconds
+            + context.one_way_latency_seconds
+            + context.cloud_wait_seconds
+            + context.cloud_service_seconds
+            + context.download_wait_seconds
+            + context.download_seconds
+            + context.one_way_latency_seconds
+            + context.cost_weight_seconds_per_usd * context.cloud_cost_usd
+        )
         return "cloud" if cloud < edge else "edge"
 
 
 class AdaptiveObserved:
     """Adaptive policy; the simulator supplies EWMA probes and learned service rates."""
+
     name = "adaptive"
 
     def choose(self, context: DecisionContext) -> str:
         edge = context.edge_wait_seconds + context.edge_service_seconds
-        cloud = (context.upload_wait_seconds + context.upload_seconds
-                 + context.one_way_latency_seconds + context.cloud_wait_seconds
-                 + context.cloud_service_seconds + context.download_wait_seconds
-                 + context.download_seconds + context.one_way_latency_seconds
-                 + context.cost_weight_seconds_per_usd * context.cloud_cost_usd)
+        cloud = (
+            context.upload_wait_seconds
+            + context.upload_seconds
+            + context.one_way_latency_seconds
+            + context.cloud_wait_seconds
+            + context.cloud_service_seconds
+            + context.download_wait_seconds
+            + context.download_seconds
+            + context.one_way_latency_seconds
+            + context.cost_weight_seconds_per_usd * context.cloud_cost_usd
+        )
         return "cloud" if cloud < edge else "edge"

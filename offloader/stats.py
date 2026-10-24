@@ -1,10 +1,11 @@
 """Statistical helpers shared by reports and simulator output."""
+
 from __future__ import annotations
 
 import math
 import random
+from collections.abc import Sequence
 from statistics import fmean, stdev
-from typing import Sequence
 
 
 def nearest_rank(values: Sequence[float], fraction: float) -> float:
@@ -23,8 +24,9 @@ def mean_std(values: Sequence[float]) -> tuple[float, float]:
     return fmean(values), stdev(values) if len(values) > 1 else 0.0
 
 
-def bootstrap_mean_ci(values: Sequence[float], *, seed: int = 0,
-                      confidence: float = 0.95, resamples: int = 10_000) -> tuple[float, float]:
+def bootstrap_mean_ci(
+    values: Sequence[float], *, seed: int = 0, confidence: float = 0.95, resamples: int = 10_000
+) -> tuple[float, float]:
     """Seeded percentile bootstrap CI for the mean; reports data, not a model claim."""
     if not values:
         raise ValueError("values must not be empty")
@@ -40,12 +42,19 @@ def bootstrap_mean_ci(values: Sequence[float], *, seed: int = 0,
     return nearest_rank(means, tail), nearest_rank(means, 1 - tail)
 
 
-def paired_mean_ci(left: Sequence[float], right: Sequence[float], *, seed: int = 0,
-                   confidence: float = 0.95, resamples: int = 10_000) -> tuple[float, float, float]:
+def paired_mean_ci(
+    left: Sequence[float],
+    right: Sequence[float],
+    *,
+    seed: int = 0,
+    confidence: float = 0.95,
+    resamples: int = 10_000,
+) -> tuple[float, float, float]:
     """Bootstrap the paired difference left-right while preserving matched seeds."""
     if len(left) != len(right) or not left:
         raise ValueError("paired samples must have the same nonzero length")
-    differences = [a - b for a, b in zip(left, right)]
-    low, high = bootstrap_mean_ci(differences, seed=seed, confidence=confidence,
-                                  resamples=resamples)
+    differences = [a - b for a, b in zip(left, right, strict=True)]
+    low, high = bootstrap_mean_ci(
+        differences, seed=seed, confidence=confidence, resamples=resamples
+    )
     return fmean(differences), low, high

@@ -1,4 +1,5 @@
 """Explainable surface-anomaly inspection shared by the edge and cloud workers."""
+
 from __future__ import annotations
 
 import base64
@@ -87,8 +88,15 @@ def inspect_surface(payload: dict) -> dict:
                         visited[neighbor] = 1
                         queue.append(neighbor)
         if area >= min_area:
-            defects.append({"x": min_x, "y": min_y, "width": max_x - min_x + 1,
-                            "height": max_y - min_y + 1, "area_pixels": area})
+            defects.append(
+                {
+                    "x": min_x,
+                    "y": min_y,
+                    "width": max_x - min_x + 1,
+                    "height": max_y - min_y + 1,
+                    "area_pixels": area,
+                }
+            )
 
     defects.sort(key=lambda item: item["area_pixels"], reverse=True)
     shown_defects = defects[:12]
@@ -98,8 +106,13 @@ def inspect_surface(payload: dict) -> dict:
         x, y = defect["x"], defect["y"]
         right, bottom = x + defect["width"] - 1, y + defect["height"] - 1
         draw.rectangle((x, y, right, bottom), outline=(255, 72, 86), width=max(2, width // 400))
-        draw.text((x + 3, max(1, y - 16)), f"D{index}", fill=(255, 72, 86), stroke_width=1,
-                  stroke_fill=(20, 24, 30))
+        draw.text(
+            (x + 3, max(1, y - 16)),
+            f"D{index}",
+            fill=(255, 72, 86),
+            stroke_width=1,
+            stroke_fill=(20, 24, 30),
+        )
     output = io.BytesIO()
     annotated.save(output, format="JPEG", quality=82, optimize=True)
     anomaly_pixels = sum(item["area_pixels"] for item in defects)
