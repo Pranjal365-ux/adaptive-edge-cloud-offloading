@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
