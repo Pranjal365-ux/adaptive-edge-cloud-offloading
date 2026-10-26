@@ -1,4 +1,5 @@
 """Edge gateway with runtime policy selection, observable decisions and cloud fallback."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,7 +28,10 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     try:
         from azure.monitor.opentelemetry import configure_azure_monitor
-        configure_azure_monitor(connection_string=os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"])
+
+        configure_azure_monitor(
+            connection_string=os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+        )
     except Exception as exc:
         LOG.error("Application Insights configuration failed: %s", type(exc).__name__)
 POLICIES = {"edge_only", "cloud_only", "threshold", "adaptive"}
@@ -44,18 +48,37 @@ CLOUD_COST_PER_SECOND = float(os.getenv("CLOUD_USD_PER_COMPUTE_SECOND", "0.0001"
 COST_WEIGHT = float(os.getenv("COST_WEIGHT_SECONDS_PER_USD", "100"))
 MAX_BODY_BYTES = 4_500_000
 TASKS = Counter("edge_decisions_total", "Edge decisions", ["policy", "destination"])
-INSPECTIONS = Counter("edge_inspections_total", "Routed image inspections by destination and verdict",
-                      ["destination", "verdict"])
-DEFECTS = Counter("edge_suspected_defects_total", "Suspected surface anomalies returned to callers",
-                  ["destination"])
-IMAGE_PIXELS = Histogram("edge_inspection_pixels", "Pixels inspected per image job",
-                          buckets=(65_536, 262_144, 524_288, 1_000_000, 1_600_000, 2_400_000))
-COMPLETION = Histogram("edge_completion_seconds", "End-to-end task latency", ["policy"],
-                       buckets=(.01, .05, .1, .25, .5, 1, 2, 5, 10, 30))
+INSPECTIONS = Counter(
+    "edge_inspections_total",
+    "Routed image inspections by destination and verdict",
+    ["destination", "verdict"],
+)
+DEFECTS = Counter(
+    "edge_suspected_defects_total",
+    "Suspected surface anomalies returned to callers",
+    ["destination"],
+)
+IMAGE_PIXELS = Histogram(
+    "edge_inspection_pixels",
+    "Pixels inspected per image job",
+    buckets=(65_536, 262_144, 524_288, 1_000_000, 1_600_000, 2_400_000),
+)
+COMPLETION = Histogram(
+    "edge_completion_seconds",
+    "End-to-end task latency",
+    ["policy"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30),
+)
 QUEUE = Gauge("edge_queue_depth", "Queued or active local edge tasks")
+EDGE_ACTIVE_WORKERS = Gauge("edge_active_workers", "Edge worker processes currently executing jobs")
+EDGE_UTILIZATION = Gauge(
+    "edge_worker_utilization_ratio", "Rolling edge worker slot utilization over 10 seconds"
+)
 _cloud_inflight_metric = Gauge("edge_cloud_inflight", "Cloud requests currently in flight")
 RTT = Gauge("edge_rtt_estimate_ms", "Measured cloud probe round-trip time")
-BANDWIDTH = Gauge("edge_bandwidth_estimate_mbps", "Application-level cloud probe throughput estimate")
+BANDWIDTH = Gauge(
+    "edge_bandwidth_estimate_mbps", "Application-level cloud probe throughput estimate"
+)
 CLOUD_COST = Counter("edge_cloud_cost_usd_total", "Synthetic estimated cloud CPU cost")
 ERRORS = Counter("edge_errors_total", "Edge errors", ["kind"])
 _active_local = 0
@@ -67,6 +90,16 @@ _breaker_open_until = 0.0
 _rtt_ewma_ms = float(os.getenv("INITIAL_RTT_MS", "100"))
 _bandwidth_ewma_mbps = float(os.getenv("INITIAL_BANDWIDTH_MBPS", "10"))
 _events: deque[dict] = deque(maxlen=200)
+_recent_completions: deque[tuple[float, str]] = deque(maxlen=5000)
+_recent_edge_compute: deque[tuple[float, float]] = deque(maxlen=2000)
+_cloud_telemetry = {
+    "available": False,
+    "worker_slots": 0,
+    "active_workers": 0,
+    "utilization_pct": None,
+    "window_seconds": 10,
+    "replica": None,
+}
 _events_signal: asyncio.Queue[None] | None = None
 _started_at = time.monotonic()
 BUILD_SHA = os.getenv("BUILD_SHA", "development")
@@ -75,7 +108,9 @@ _scenario_task: asyncio.Task | None = None
 
 class ComputeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    task_id: str = Field(default_factory=lambda: f"JOB-{uuid.uuid4().hex[:10].upper()}", min_length=1, max_length=80)
+    task_id: str = Field(
+        default_factory=lambda: f"JOB-{uuid.uuid4().hex[:10].upper()}", min_length=1, max_length=80
+    )
     task_type: Literal["surface_defect_inspection"] = "surface_defect_inspection"
     source: str = Field(default="sensor-gateway-07", min_length=1, max_length=100)
     priority: Literal["low", "normal", "high"] = "normal"
@@ -89,7 +124,9 @@ class ComputeRequest(BaseModel):
     @model_validator(mode="after")
     def validate_image(self):
         if not self.image_base64 or self.image_width is None or self.image_height is None:
-            raise ValueError("image_base64, image_width, and image_height are required for inspection")
+            raise ValueError(
+                "image_base64, image_width, and image_height are required for inspection"
+            )
         if self.image_width * self.image_height > 2_400_000:
             raise ValueError("image is too large; choose a lower inspection detail")
         return self
@@ -107,17 +144,12 @@ class ScenarioUpdate(BaseModel):
     name: str
 
 
-class RaceRequest(BaseModel):
-    seed: int = Field(default=3001, ge=1)
-    tasks: int = Field(default=100, ge=20, le=1000)
-    scenario: str = "random_walk_bandwidth"
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _events_signal
     app.state.pool = ProcessPoolExecutor(max_workers=EDGE_WORKERS)
     app.state.semaphore = asyncio.Semaphore(EDGE_WORKERS)
+    app.state.edge_active_started = {}
     app.state.client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0))
     _events_signal = asyncio.Queue(maxsize=1)
     probe = asyncio.create_task(probe_loop())
@@ -144,9 +176,18 @@ async def request_guard_and_logging(request: Request, call_next):
     started = time.perf_counter()
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
-    LOG.info(json.dumps({"event": "http_request", "request_id": request_id,
-        "method": request.method, "path": request.url.path, "status": response.status_code,
-        "duration_ms": round((time.perf_counter() - started) * 1000, 3)}))
+    LOG.info(
+        json.dumps(
+            {
+                "event": "http_request",
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+            }
+        )
+    )
     return response
 
 
@@ -160,14 +201,21 @@ def choose_destination(payload: ComputeRequest, active_local: int) -> tuple[str,
     workload_ms = payload.work_units * EDGE_MS_PER_WORK_UNIT
     edge_wait_ms = active_local * workload_ms / EDGE_WORKERS
     edge_ms = edge_wait_ms + workload_ms
-    input_bytes = (len(payload.image_base64.encode("ascii")) if payload.task_type == "surface_defect_inspection"
-                   else len(payload.data.encode("utf-8")))
-    transfer_ms = input_bytes * 0.008 / max(_bandwidth_ewma_mbps, 0.01)
+    input_bytes = (
+        len(payload.image_base64.encode("ascii"))
+        if payload.task_type == "surface_defect_inspection"
+        else len(payload.data.encode("utf-8"))
+    )
+    # The cloud response includes an annotated image, so estimate both upload and download.
+    transfer_ms = 2 * input_bytes * 0.008 / max(_bandwidth_ewma_mbps, 0.01)
     cloud_service_ms = payload.work_units * CLOUD_MS_PER_WORK_UNIT
-    cloud_wait_ms = (_active_cloud / CLOUD_WORKERS) * cloud_service_ms
+    cloud_capacity = max(1, int(_cloud_telemetry.get("worker_slots") or CLOUD_WORKERS))
+    cloud_active = max(_active_cloud, int(_cloud_telemetry.get("active_workers") or 0))
+    cloud_wait_ms = (cloud_active / cloud_capacity) * cloud_service_ms
     cloud_ms = _rtt_ewma_ms + transfer_ms + cloud_wait_ms + cloud_service_ms
     cost_usd = CostModel(compute_usd_per_second=CLOUD_COST_PER_SECOND).estimate(
-        cloud_service_ms / 1000, 0)
+        cloud_service_ms / 1000, 0
+    )
     policy = POLICY
     if policy == "edge_only":
         destination = "edge"
@@ -181,13 +229,23 @@ def choose_destination(payload: ComputeRequest, active_local: int) -> tuple[str,
     else:
         cloud_adjusted_ms = cloud_ms + COST_WEIGHT * cost_usd * 1000
         destination = "cloud" if cloud_adjusted_ms < edge_ms else "edge"
-        reason = (f"Predicted edge {edge_ms:.1f} ms vs cloud {cloud_ms:.1f} ms; "
-                  f"cloud cost estimate ${cost_usd:.7f}; edge activity {active_local}")
-    return destination, {"policy": policy, "destination": destination, "reason": reason,
-        "predicted_edge_ms": edge_ms, "predicted_cloud_ms": cloud_ms,
-        "rtt_estimate_ms": _rtt_ewma_ms, "bandwidth_estimate_mbps": _bandwidth_ewma_mbps,
-        "edge_queue_depth": active_local, "cloud_inflight_estimate": _active_cloud,
-        "cloud_cost_estimate_usd": cost_usd}
+        reason = (
+            f"Predicted edge {edge_ms:.1f} ms vs cloud {cloud_ms:.1f} ms; "
+            f"cloud cost estimate ${cost_usd:.7f}; edge activity {active_local}"
+        )
+    return destination, {
+        "policy": policy,
+        "destination": destination,
+        "reason": reason,
+        "predicted_edge_ms": edge_ms,
+        "predicted_cloud_ms": cloud_ms,
+        "rtt_estimate_ms": _rtt_ewma_ms,
+        "bandwidth_estimate_mbps": _bandwidth_ewma_mbps,
+        "predicted_transfer_ms": transfer_ms,
+        "edge_queue_depth": active_local,
+        "cloud_inflight_estimate": _active_cloud,
+        "cloud_cost_estimate_usd": cost_usd,
+    }
 
 
 def learn_service_rate(destination: str, work_units: int, compute_ms: float) -> None:
@@ -197,9 +255,9 @@ def learn_service_rate(destination: str, work_units: int, compute_ms: float) -> 
         return
     measured = compute_ms / work_units
     if destination == "edge":
-        EDGE_MS_PER_WORK_UNIT = .8 * EDGE_MS_PER_WORK_UNIT + .2 * measured
+        EDGE_MS_PER_WORK_UNIT = 0.8 * EDGE_MS_PER_WORK_UNIT + 0.2 * measured
     else:
-        CLOUD_MS_PER_WORK_UNIT = .8 * CLOUD_MS_PER_WORK_UNIT + .2 * measured
+        CLOUD_MS_PER_WORK_UNIT = 0.8 * CLOUD_MS_PER_WORK_UNIT + 0.2 * measured
 
 
 async def run_edge(payload: ComputeRequest, request_id: str):
@@ -210,8 +268,24 @@ async def run_edge(payload: ComputeRequest, request_id: str):
     QUEUE.set(active)
     try:
         async with app.state.semaphore:
-            result = await asyncio.get_running_loop().run_in_executor(
-                app.state.pool, execute, payload.model_dump())
+            token = uuid.uuid4().hex
+            started = time.monotonic()
+            app.state.edge_active_started[token] = started
+            EDGE_ACTIVE_WORKERS.set(len(app.state.edge_active_started))
+            try:
+                result = await asyncio.get_running_loop().run_in_executor(
+                    app.state.pool, execute, payload.model_dump()
+                )
+            finally:
+                elapsed = time.monotonic() - started
+                app.state.edge_active_started.pop(token, None)
+                EDGE_ACTIVE_WORKERS.set(len(app.state.edge_active_started))
+                _recent_edge_compute.append((time.monotonic(), elapsed))
+                EDGE_UTILIZATION.set(
+                    worker_utilization(
+                        _recent_edge_compute, app.state.edge_active_started.values(), EDGE_WORKERS
+                    )
+                )
         learn_service_rate("edge", payload.work_units, result["compute_ms"])
         return result
     finally:
@@ -241,24 +315,36 @@ async def record_cloud_success() -> None:
 
 async def probe_loop() -> None:
     global _rtt_ewma_ms, _bandwidth_ewma_mbps
-    retry_delay = 5
+    retry_delay = 2
     while True:
         try:
             started = time.perf_counter()
             response = await app.state.client.get(f"{CLOUD_URL}/health")
             response.raise_for_status()
             rtt_ms = (time.perf_counter() - started) * 1000
-            _rtt_ewma_ms = .8 * _rtt_ewma_ms + .2 * rtt_ms
+            _rtt_ewma_ms = 0.65 * _rtt_ewma_ms + 0.35 * rtt_ms
             RTT.set(_rtt_ewma_ms)
             started = time.perf_counter()
-            response = await app.state.client.post(f"{CLOUD_URL}/probe?byte_count=32768",
-                headers={"X-API-Key": CLOUD_API_KEY})
+            response = await app.state.client.post(
+                f"{CLOUD_URL}/probe?byte_count=262144", headers={"X-API-Key": CLOUD_API_KEY}
+            )
             response.raise_for_status()
-            elapsed = max(time.perf_counter() - started, .001)
-            measured = len(response.content) * 8 / elapsed / 1_000_000
-            _bandwidth_ewma_mbps = .8 * _bandwidth_ewma_mbps + .2 * measured
+            elapsed = max(time.perf_counter() - started, 0.001)
+            transfer_seconds = max(elapsed - _rtt_ewma_ms / 1000, 0.001)
+            measured = len(response.content) * 8 / transfer_seconds / 1_000_000
+            _bandwidth_ewma_mbps = 0.65 * _bandwidth_ewma_mbps + 0.35 * measured
             BANDWIDTH.set(_bandwidth_ewma_mbps)
-            retry_delay = 5
+            retry_delay = 2
+            try:
+                telemetry = await app.state.client.get(
+                    f"{CLOUD_URL}/telemetry", headers={"X-API-Key": CLOUD_API_KEY}
+                )
+                telemetry.raise_for_status()
+                _cloud_telemetry.update(telemetry.json())
+                _cloud_telemetry["available"] = True
+                _cloud_telemetry["updated_at"] = time.time()
+            except (httpx.HTTPError, ValueError):
+                _cloud_telemetry["available"] = False
         except (httpx.HTTPError, ValueError):
             ERRORS.labels(kind="probe").inc()
             retry_delay = min(retry_delay * 2, 30)
@@ -270,7 +356,8 @@ async def replace_toxics(specs: list[dict]) -> None:
     response.raise_for_status()
     for toxic in response.json():
         removed = await app.state.client.delete(
-            f"{CLOUD_PROXY_API}/proxies/cloud/toxics/{toxic['name']}")
+            f"{CLOUD_PROXY_API}/proxies/cloud/toxics/{toxic['name']}"
+        )
         removed.raise_for_status()
     for spec in specs:
         created = await app.state.client.post(f"{CLOUD_PROXY_API}/proxies/cloud/toxics", json=spec)
@@ -278,14 +365,23 @@ async def replace_toxics(specs: list[dict]) -> None:
 
 
 def toxic(name: str, toxic_type: str, attributes: dict, stream: str = "downstream") -> dict:
-    return {"name": name, "type": toxic_type, "stream": stream,
-            "toxicity": 1.0, "attributes": attributes}
+    return {
+        "name": name,
+        "type": toxic_type,
+        "stream": stream,
+        "toxicity": 1.0,
+        "attributes": attributes,
+    }
 
 
 async def run_flapping() -> None:
     while True:
-        await replace_toxics([toxic("latency", "latency", {"latency": 300, "jitter": 25}),
-                              toxic("bandwidth", "bandwidth", {"rate": 128})])
+        await replace_toxics(
+            [
+                toxic("latency", "latency", {"latency": 300, "jitter": 25}),
+                toxic("bandwidth", "bandwidth", {"rate": 128}),
+            ]
+        )
         await asyncio.sleep(30)
         await replace_toxics([])
         await asyncio.sleep(30)
@@ -296,10 +392,14 @@ async def run_random_walk() -> None:
     bandwidth_kbps = 2048.0
     latency_ms = 25.0
     while True:
-        bandwidth_kbps = min(8192.0, max(64.0, bandwidth_kbps * (1 + rng.uniform(-.25, .25))))
-        latency_ms = min(500.0, max(5.0, latency_ms * (1 + rng.uniform(-.25, .25))))
-        await replace_toxics([toxic("latency", "latency", {"latency": round(latency_ms), "jitter": 10}),
-                              toxic("bandwidth", "bandwidth", {"rate": round(bandwidth_kbps)})])
+        bandwidth_kbps = min(8192.0, max(64.0, bandwidth_kbps * (1 + rng.uniform(-0.25, 0.25))))
+        latency_ms = min(500.0, max(5.0, latency_ms * (1 + rng.uniform(-0.25, 0.25))))
+        await replace_toxics(
+            [
+                toxic("latency", "latency", {"latency": round(latency_ms), "jitter": 10}),
+                toxic("bandwidth", "bandwidth", {"rate": round(bandwidth_kbps)}),
+            ]
+        )
         await asyncio.sleep(5)
 
 
@@ -315,8 +415,12 @@ def readyz():
 
 @app.get("/version")
 def version():
-    return {"service": "edge-gateway", "build_sha": BUILD_SHA,
-            "active_policy": POLICY, "cloud_url_configured": bool(CLOUD_URL)}
+    return {
+        "service": "edge-gateway",
+        "build_sha": BUILD_SHA,
+        "active_policy": POLICY,
+        "cloud_url_configured": bool(CLOUD_URL),
+    }
 
 
 @app.get("/policy")
@@ -336,6 +440,14 @@ def put_policy(update: PolicyUpdate):
 @app.put("/scenario")
 async def put_scenario(update: ScenarioUpdate):
     global _scenario_task
+    if "toxiproxy" not in CLOUD_URL:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Network scenarios require the local Toxiproxy path; they are disabled "
+                "for a direct Azure worker connection."
+            ),
+        )
     if update.name not in {"good", "poor", "flapping", "random-walk", "lossy"}:
         raise HTTPException(status_code=422, detail="unknown network scenario")
     if _scenario_task:
@@ -349,8 +461,12 @@ async def put_scenario(update: ScenarioUpdate):
     elif update.name == "good":
         await replace_toxics([])
     elif update.name == "poor":
-        await replace_toxics([toxic("latency", "latency", {"latency": 300, "jitter": 25}),
-                              toxic("bandwidth", "bandwidth", {"rate": 128})])
+        await replace_toxics(
+            [
+                toxic("latency", "latency", {"latency": 300, "jitter": 25}),
+                toxic("bandwidth", "bandwidth", {"rate": 128}),
+            ]
+        )
     else:
         await replace_toxics([toxic("timeout", "timeout", {"timeout": 1})])
     return {"scenario": update.name, "applied": True}
@@ -372,11 +488,20 @@ async def submit_task(payload: ComputeRequest, request: Request):
         _active_cloud += 1
         _cloud_inflight_metric.set(_active_cloud)
         try:
-            response = await app.state.client.post(f"{CLOUD_URL}/compute",
-                json={key: getattr(payload, key) for key in
-                      ("task_type", "image_base64", "image_width",
-                       "image_height", "sensitivity")},
-                headers={"X-API-Key": CLOUD_API_KEY, "X-Request-ID": request_id})
+            response = await app.state.client.post(
+                f"{CLOUD_URL}/compute",
+                json={
+                    key: getattr(payload, key)
+                    for key in (
+                        "task_type",
+                        "image_base64",
+                        "image_width",
+                        "image_height",
+                        "sensitivity",
+                    )
+                },
+                headers={"X-API-Key": CLOUD_API_KEY, "X-Request-ID": request_id},
+            )
             response.raise_for_status()
             result = response.json()
             learn_service_rate("cloud", payload.work_units, result.get("compute_ms", 0))
@@ -405,26 +530,197 @@ async def submit_task(payload: ComputeRequest, request: Request):
         IMAGE_PIXELS.observe(result["pixels_processed"])
     elapsed = time.perf_counter() - start
     COMPLETION.labels(policy=decision["policy"]).observe(elapsed)
-    event = {"request_id": request_id, "task_id": payload.task_id, "task_type": payload.task_type,
-        "source": payload.source, "priority": payload.priority, "record_count": payload.record_count,
-        "workload_profile": payload.workload_profile, "policy": decision["policy"],
-        "destination": destination, "reason": decision["reason"],
-        "completion_ms": round(elapsed * 1000, 3), "fallback": fallback,
-        "verdict": result.get("verdict"), "defect_count": result.get("defect_count"),
-        "digest": result.get("digest")}
+    event = {
+        "request_id": request_id,
+        "task_id": payload.task_id,
+        "task_type": payload.task_type,
+        "source": payload.source,
+        "priority": payload.priority,
+        "record_count": payload.record_count,
+        "workload_profile": payload.workload_profile,
+        "policy": decision["policy"],
+        "destination": destination,
+        "reason": decision["reason"],
+        "completion_ms": round(elapsed * 1000, 3),
+        "fallback": fallback,
+        "verdict": result.get("verdict"),
+        "defect_count": result.get("defect_count"),
+        "digest": result.get("digest"),
+    }
+    _recent_completions.append((time.monotonic(), destination))
     add_event(event)
-    return {**result, **decision, "task_id": payload.task_id, "task_type": payload.task_type,
-        "source": payload.source, "priority": payload.priority, "record_count": payload.record_count,
-        "workload_profile": payload.workload_profile, "destination": destination, "fallback": fallback,
-        "completion_ms": round(elapsed * 1000, 3), "request_id": request_id}
+    return {
+        **result,
+        **decision,
+        "task_id": payload.task_id,
+        "task_type": payload.task_type,
+        "source": payload.source,
+        "priority": payload.priority,
+        "record_count": payload.record_count,
+        "workload_profile": payload.workload_profile,
+        "destination": destination,
+        "fallback": fallback,
+        "completion_ms": round(elapsed * 1000, 3),
+        "request_id": request_id,
+    }
+
+
+@app.post("/compare")
+async def compare_workers(payload: ComputeRequest, request: Request):
+    """Run one validated image independently on both workers for a real comparison."""
+    request_id = request.headers.get("x-request-id", payload.task_id)[:128]
+
+    async def edge_run():
+        started = time.perf_counter()
+        result = await run_edge(payload, f"{request_id}-edge")
+        return {
+            **result,
+            "completion_ms": round((time.perf_counter() - started) * 1000, 3),
+            "destination": "edge",
+            "fallback": False,
+        }
+
+    async def cloud_run():
+        global _active_cloud
+        if await cloud_open():
+            raise RuntimeError(
+                "Cloud circuit breaker is open; comparison did not send a cloud request"
+            )
+        _active_cloud += 1
+        _cloud_inflight_metric.set(_active_cloud)
+        started = time.perf_counter()
+        try:
+            response = await app.state.client.post(
+                f"{CLOUD_URL}/compute",
+                json={
+                    key: getattr(payload, key)
+                    for key in (
+                        "task_type",
+                        "image_base64",
+                        "image_width",
+                        "image_height",
+                        "sensitivity",
+                    )
+                },
+                headers={"X-API-Key": CLOUD_API_KEY, "X-Request-ID": f"{request_id}-cloud"},
+            )
+            response.raise_for_status()
+            result = response.json()
+            learn_service_rate("cloud", payload.work_units, result.get("compute_ms", 0))
+            await record_cloud_success()
+            return {
+                **result,
+                "completion_ms": round((time.perf_counter() - started) * 1000, 3),
+                "destination": "cloud",
+                "fallback": False,
+            }
+        except (httpx.HTTPError, ValueError) as exc:
+            await record_cloud_failure()
+            raise RuntimeError(f"Cloud comparison failed: {type(exc).__name__}") from exc
+        finally:
+            _active_cloud -= 1
+            _cloud_inflight_metric.set(_active_cloud)
+
+    edge_result, cloud_result = await asyncio.gather(
+        edge_run(), cloud_run(), return_exceptions=True
+    )
+    results = {}
+    for destination, result in (("edge", edge_result), ("cloud", cloud_result)):
+        if isinstance(result, BaseException):
+            results[destination] = {"error": str(result)}
+            ERRORS.labels(kind=f"compare_{destination}").inc()
+            continue
+        results[destination] = result
+        TASKS.labels(policy="compare", destination=destination).inc()
+        _recent_completions.append((time.monotonic(), destination))
+        COMPLETION.labels(policy="compare").observe(result["completion_ms"] / 1000)
+        INSPECTIONS.labels(destination=destination, verdict=result["verdict"]).inc()
+        DEFECTS.labels(destination=destination).inc(result.get("defect_count", 0))
+        IMAGE_PIXELS.observe(result["pixels_processed"])
+        if destination == "cloud":
+            CLOUD_COST.inc(result.get("compute_ms", 0) / 1000 * CLOUD_COST_PER_SECOND)
+        add_event(
+            {
+                "request_id": f"{request_id}-{destination}",
+                "task_id": payload.task_id,
+                "task_type": payload.task_type,
+                "source": payload.source,
+                "priority": payload.priority,
+                "record_count": payload.record_count,
+                "workload_profile": payload.workload_profile,
+                "policy": "compare",
+                "destination": destination,
+                "reason": "Same-image live comparison",
+                "completion_ms": result["completion_ms"],
+                "fallback": False,
+                "verdict": result["verdict"],
+                "defect_count": result.get("defect_count"),
+            }
+        )
+    return {
+        "mode": "live_comparison",
+        "task_id": payload.task_id,
+        "request_id": request_id,
+        "results": results,
+        "same_input": True,
+        "note": (
+            "Both workers independently processed the same image; elapsed times "
+            "include their respective request paths."
+        ),
+    }
 
 
 @app.get("/status")
 def status():
-    return {"policy": POLICY, "queue_depth": _active_local, "rtt_ms": _rtt_ewma_ms,
-            "bandwidth_mbps": _bandwidth_ewma_mbps,
-            "circuit_open": time.monotonic() < _breaker_open_until,
-            "recent_events": list(_events), "build_sha": BUILD_SHA}
+    now = time.monotonic()
+    active_edge = (
+        tuple(app.state.edge_active_started.values())
+        if hasattr(app.state, "edge_active_started")
+        else ()
+    )
+    edge_utilization = worker_utilization(_recent_edge_compute, active_edge, EDGE_WORKERS, now)
+    EDGE_UTILIZATION.set(edge_utilization)
+    cutoff = now - 60
+    while _recent_completions and _recent_completions[0][0] < cutoff:
+        _recent_completions.popleft()
+    edge_rate = sum(destination == "edge" for _, destination in _recent_completions)
+    cloud_rate = sum(destination == "cloud" for _, destination in _recent_completions)
+    return {
+        "policy": POLICY,
+        "queue_depth": _active_local,
+        "rtt_ms": _rtt_ewma_ms,
+        "bandwidth_mbps": _bandwidth_ewma_mbps,
+        "circuit_open": time.monotonic() < _breaker_open_until,
+        "recent_events": list(_events),
+        "build_sha": BUILD_SHA,
+        "worker_utilization": {
+            "edge": {
+                "available": True,
+                "worker_slots": EDGE_WORKERS,
+                "active_workers": len(active_edge),
+                "utilization_pct": round(edge_utilization * 100, 2),
+                "window_seconds": 10,
+            },
+            "cloud": dict(_cloud_telemetry),
+        },
+        "throughput_per_minute": {
+            "total": edge_rate + cloud_rate,
+            "edge": edge_rate,
+            "cloud": cloud_rate,
+        },
+        "scenario_controls_enabled": "toxiproxy" in CLOUD_URL,
+    }
+
+
+def worker_utilization(
+    recent_compute: deque, active_started, capacity: int, now: float | None = None
+) -> float:
+    """Return rolling worker-slot occupancy as a fraction in the range 0..1."""
+    now = time.monotonic() if now is None else now
+    cutoff = now - 10.0
+    completed = sum(seconds for finished, seconds in recent_compute if finished >= cutoff)
+    active = sum(max(0.0, now - max(started, cutoff)) for started in active_started)
+    return min(1.0, (completed + active) / (max(capacity, 1) * 10.0))
 
 
 @app.get("/events")
@@ -441,34 +737,12 @@ async def events():
                     await asyncio.wait_for(_events_signal.get(), timeout=15)
                 except TimeoutError:
                     yield ": keepalive\n\n"
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-
-@app.post("/race")
-def race(race_request: RaceRequest):
-    """Replay one seeded simulator trace through every policy; this is not live traffic."""
-    from offloader.simulator import POLICIES, SCENARIOS, Simulation, generate_tasks, tune_threshold
-
-    scenario = next((item for item in SCENARIOS if item.name == race_request.scenario), None)
-    if scenario is None:
-        raise HTTPException(status_code=422, detail="unknown simulator scenario")
-    tasks = generate_tasks(race_request.seed, race_request.tasks, scenario.arrival_rate)
-    threshold, _ = tune_threshold(race_request.tasks, [1001, 1002])
-    results = []
-    for policy in POLICIES:
-        _, summary = Simulation(scenario, tasks, policy, threshold,
-                                network_seed=race_request.seed).run()
-        results.append(summary)
-    lower_is_better = {"mean_completion_s", "p95_completion_s", "cloud_cost_usd", "network_mb"}
-    winners = {}
-    for metric in ("mean_completion_s", "p95_completion_s", "throughput_tasks_per_s",
-                   "cloud_cost_usd"):
-        key = min if metric in lower_is_better else max
-        winners[metric] = key(results, key=lambda row: row[metric])["policy"]
-    return {"mode": "simulated", "scenario": scenario.name, "seed": race_request.seed,
-        "tasks": race_request.tasks, "adaptive_note": "adaptive uses EWMA probes and learned service rates; adaptive_oracle sees exact simulator state",
-        "results": results, "winners": winners}
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/metrics")

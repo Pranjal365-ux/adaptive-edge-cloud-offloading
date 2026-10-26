@@ -12,9 +12,7 @@ COPY requirements-services.txt .
 RUN python -m pip install --no-index --find-links=/wheels -r requirements-services.txt \
     && rm -rf /wheels
 COPY offloader/ ./offloader/
-COPY offloading.py ./offloading.py
 COPY services/ ./services/
-RUN mkdir -p /results && chown app:app /results
 USER app:app
 EXPOSE 8080
 HEALTHCHECK --interval=20s --timeout=3s --start-period=10s --retries=3 \

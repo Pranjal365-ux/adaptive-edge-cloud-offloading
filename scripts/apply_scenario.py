@@ -1,4 +1,5 @@
 """Apply a checked-in Toxiproxy scenario through the edge gateway."""
+
 from __future__ import annotations
 
 import argparse
@@ -17,9 +18,12 @@ def main() -> int:
     parser.add_argument("--gateway", default="http://127.0.0.1:8000")
     args = parser.parse_args()
     config = json.loads((SCENARIOS / f"{args.scenario}.yaml").read_text(encoding="utf-8"))
-    request = urllib.request.Request(f"{args.gateway.rstrip('/')}/scenario",
-        data=json.dumps({"name": config["name"]}).encode(), method="PUT",
-        headers={"Content-Type": "application/json"})
+    request = urllib.request.Request(
+        f"{args.gateway.rstrip('/')}/scenario",
+        data=json.dumps({"name": config["name"]}).encode(),
+        method="PUT",
+        headers={"Content-Type": "application/json"},
+    )
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             print(response.read().decode("utf-8"))

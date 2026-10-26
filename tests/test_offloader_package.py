@@ -1,81 +1,149 @@
+import base64
+import io
 import json
 import unittest
+from collections import deque
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw
+
 from offloader.costs import CostModel
-from offloader.policies import AdaptiveOracle, DecisionContext, EdgeOnly, CloudOnly, Threshold
-from offloader.stats import bootstrap_mean_ci, mean_std, nearest_rank, paired_mean_ci
-from offloading import Scenario, Simulation, Task
+from offloader.inspection import inspect_surface
+from offloader.tasks import execute
+from services import cloud_worker, edge_gateway
 
 
-def context(**changes):
-    values = dict(work_mi=100, input_mb=0.1, output_mb=0.01,
-        edge_service_seconds=1, cloud_service_seconds=0.1, upload_seconds=0.01,
-        download_seconds=0.001, one_way_latency_seconds=0.01,
-        edge_wait_seconds=0, cloud_wait_seconds=0, upload_wait_seconds=0,
-        download_wait_seconds=0, cloud_cost_usd=0.0001,
-        cost_weight_seconds_per_usd=100)
-    values.update(changes)
-    return DecisionContext(**values)
+def image_job():
+    image = Image.new("RGB", (160, 120), (185, 190, 195))
+    draw = ImageDraw.Draw(image)
+    draw.line((18, 42, 144, 76), fill=(10, 12, 14), width=2)
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=90)
+    return {
+        "task_id": "JOB-TEST-001",
+        "task_type": "surface_defect_inspection",
+        "source": "test-camera",
+        "priority": "normal",
+        "workload_profile": "balanced",
+        "record_count": 1,
+        "image_base64": base64.b64encode(output.getvalue()).decode("ascii"),
+        "image_width": 160,
+        "image_height": 120,
+        "sensitivity": "normal",
+    }
 
 
-class PackageTests(unittest.TestCase):
+class FakeResponse:
+    def __init__(self, body):
+        self.body = body
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.body
+
+
+class DeliverableTests(unittest.TestCase):
     def test_toxiproxy_startup_config_uses_documented_array_shape(self):
         config = json.loads(Path("toxiproxy/config.json").read_text(encoding="utf-8"))
         self.assertIsInstance(config, list)
         self.assertEqual(config[0]["name"], "cloud")
         self.assertEqual(config[0]["listen"], "0.0.0.0:8666")
 
-    def test_nearest_rank_and_seeded_bootstrap(self):
-        values = list(range(1, 22))
-        self.assertEqual(nearest_rank(values, .95), 20)
-        self.assertEqual(bootstrap_mean_ci(values, seed=7, resamples=500),
-                         bootstrap_mean_ci(values, seed=7, resamples=500))
-        self.assertEqual(mean_std([4]), (4, 0))
-
-    def test_paired_ci_retains_pairing_and_direction(self):
-        mean, low, high = paired_mean_ci([3, 4, 5], [1, 2, 3], seed=5, resamples=500)
-        self.assertEqual(mean, 2)
-        self.assertEqual((low, high), (2, 2))
-
-    def test_policy_behavior_and_cost_tradeoff(self):
-        self.assertEqual(EdgeOnly().choose(context()), "edge")
-        self.assertEqual(CloudOnly().choose(context()), "cloud")
-        self.assertEqual(Threshold(100).choose(context()), "edge")
-        self.assertEqual(Threshold(99).choose(context()), "cloud")
-        self.assertEqual(AdaptiveOracle().choose(context()), "cloud")
-        self.assertEqual(AdaptiveOracle().choose(context(
-            one_way_latency_seconds=3, cloud_cost_usd=1)), "edge")
-
     def test_cost_model_validates_and_accounts_components(self):
-        costs = CostModel(.1, .02, .5)
-        self.assertAlmostEqual(costs.estimate(2, 1000), .72)
+        costs = CostModel(0.1, 0.02, 0.5)
+        self.assertAlmostEqual(costs.estimate(2, 1000), 0.72)
         with self.assertRaises(ValueError):
             costs.estimate(-1, 0)
 
-    def test_random_walk_is_seeded_and_changes_over_time(self):
-        scenario = Scenario("walk", 1, 40, 60, random_walk_network=True)
-        task = [Task(0, 30, 1, .1, .01)]
-        first = Simulation(scenario, task, "edge_only", 100, network_seed=19)
-        second = Simulation(scenario, task, "edge_only", 100, network_seed=19)
-        at_start = first.network_at(0)
-        at_end = first.network_at(30)
-        self.assertEqual(at_end, second.network_at(30))
-        self.assertNotEqual(at_start, at_end)
+    def test_inspection_returns_review_and_annotated_image_for_scratch(self):
+        result = inspect_surface(image_job())
+        self.assertEqual(result["verdict"], "REVIEW")
+        self.assertGreater(result["defect_count"], 0)
+        self.assertTrue(result["annotated_image_base64"])
 
-    def test_observed_adaptive_ignores_unmeasured_current_link(self):
-        task = [Task(0, 0, 1500, .01, .01)]
-        scenario = Scenario("changing", 1, 80, 10)
-        sim = Simulation(scenario, task, "adaptive", 0)
-        sim.measured_rtt_ms = 10_000
-        sim.measured_bandwidth_mbps = 1
-        # The current true link is fast. The policy must continue using its probe EWMA.
-        with patch.object(sim, "network_at", return_value=(1000, 1)):
-            self.assertEqual(sim.choose(task[0]), "edge")
-        sim.policy = "adaptive_oracle"
-        with patch.object(sim, "network_at", return_value=(1000, 1)):
-            self.assertEqual(sim.choose(task[0]), "cloud")
+    def test_inspection_rejects_missing_or_malformed_image(self):
+        with self.assertRaisesRegex(ValueError, "image_base64 is required"):
+            inspect_surface({})
+        with self.assertRaisesRegex(ValueError, "valid base64"):
+            inspect_surface({**image_job(), "image_base64": "not-base64!"})
+
+    def test_inspection_rejects_bad_dimensions_and_sensitivity(self):
+        job = image_job()
+        with self.assertRaisesRegex(ValueError, "sensitivity"):
+            inspect_surface({**job, "sensitivity": "extreme"})
+        with self.assertRaisesRegex(ValueError, "dimensions"):
+            inspect_surface({**job, "image_width": 159})
+
+    def test_worker_utilization_uses_busy_time_over_capacity_window(self):
+        history = deque([(99.0, 2.0)])
+        self.assertAlmostEqual(edge_gateway.worker_utilization(history, (), 2, now=100.0), 0.1)
+        self.assertEqual(edge_gateway.worker_utilization(history, (), 0, now=100.0), 0.2)
+
+    def test_status_exposes_live_worker_graph_and_throughput_fields(self):
+        old_url = edge_gateway.CLOUD_URL
+        old_policy = edge_gateway.POLICY
+        edge_gateway.CLOUD_URL = "http://127.0.0.1:1"
+        edge_gateway.POLICY = "edge_only"
+        previous_completions = list(edge_gateway._recent_completions)
+        edge_gateway._recent_completions.clear()
+        try:
+            with TestClient(edge_gateway.app) as client:
+                status = client.get("/status").json()
+            self.assertIn("edge", status["worker_utilization"])
+            self.assertIn("cloud", status["worker_utilization"])
+            self.assertEqual(status["throughput_per_minute"]["total"], 0)
+            self.assertFalse(status["scenario_controls_enabled"])
+        finally:
+            edge_gateway._recent_completions.clear()
+            edge_gateway._recent_completions.extend(previous_completions)
+            edge_gateway.CLOUD_URL = old_url
+            edge_gateway.POLICY = old_policy
+
+    def test_edge_task_and_same_image_comparison_return_real_worker_results(self):
+        old_url = edge_gateway.CLOUD_URL
+        old_policy = edge_gateway.POLICY
+        edge_gateway.CLOUD_URL = "http://127.0.0.1:1"
+        edge_gateway.POLICY = "edge_only"
+        try:
+            with TestClient(edge_gateway.app) as client:
+                single = client.post("/tasks", json=image_job())
+                self.assertEqual(single.status_code, 200, single.text)
+                self.assertEqual(single.json()["destination"], "edge")
+
+            edge_result = execute(image_job())
+
+            async def fake_post(url, **kwargs):
+                self.assertTrue(url.endswith("/compute"))
+                return FakeResponse(edge_result)
+
+            with TestClient(edge_gateway.app) as client:
+                with patch.object(
+                    edge_gateway.app.state, "client", wraps=edge_gateway.app.state.client
+                ):
+                    edge_gateway.app.state.client.post = fake_post
+                    comparison = client.post("/compare", json=image_job())
+                self.assertEqual(comparison.status_code, 200, comparison.text)
+                body = comparison.json()
+                self.assertTrue(body["same_input"])
+                self.assertEqual(body["mode"], "live_comparison")
+                self.assertIn("annotated_image_base64", body["results"]["edge"])
+                self.assertIn("annotated_image_base64", body["results"]["cloud"])
+        finally:
+            edge_gateway.CLOUD_URL = old_url
+            edge_gateway.POLICY = old_policy
+
+    def test_cloud_telemetry_requires_the_worker_key(self):
+        with TestClient(cloud_worker.app) as client:
+            self.assertEqual(client.get("/telemetry").status_code, 401)
+            response = client.get("/telemetry", headers={"X-API-Key": cloud_worker.API_KEY})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertGreaterEqual(body["worker_slots"], 1)
+        self.assertGreaterEqual(body["utilization_pct"], 0)
 
 
 if __name__ == "__main__":

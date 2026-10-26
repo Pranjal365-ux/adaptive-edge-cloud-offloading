@@ -93,20 +93,6 @@ services:
     mem_limit: 256m
     cpus: 0.5
 
-  simulator:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
-    image: offloadops-edge:local
-    command: ["python", "offloading.py", "--tasks", "300", "--seeds", "20", "--output", "/results"]
-    profiles: [simulation]
-    volumes:
-      - simulation-results:/results
-    mem_limit: 512m
-    cpus: 0.75
-
 volumes:
   prometheus-data:
   grafana-data:
-  simulation-results:

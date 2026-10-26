@@ -5,22 +5,18 @@ venv/
 .env
 .env.*
 
-# Local experiment outputs (sample_results is a curated synthetic example).
+# Local-only outputs and test artifacts
 results/
 quick_results/
 live_results/
-live_probe.csv
+*.coverage
+.coverage
+htmlcov/
+ci-results/
+.pytest_cache/
+.ruff_cache/
 
-# Terraform state and deployment artifacts are private.
-terraform/.terraform/
-terraform/terraform.tfstate
-terraform/terraform.tfstate.*
-terraform/*.tfplan
-terraform/tfplan
-terraform/function.zip
-terraform/crash.log
-terraform/crash.*.log
-evidence/
+# Private Terraform state, plans, and variable files
 *.tfstate
 *.tfstate.*
 *.tfplan
@@ -31,13 +27,7 @@ infra/**/*.tfstate*
 infra/**/*.tfplan
 infra/**/terraform.tfvars
 infra/**/terraform.tfvars.json
+
 build/
 dist/
 *.egg-info/
-.pytest_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-ci-results/
-temp_validation/
-dashboard_results/

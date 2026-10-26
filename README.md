@@ -1,114 +1,66 @@
 # OffloadOps
 
-OffloadOps is a reproducible edge-to-cloud offloading project with a discrete-event simulator and a locally containerized service demo. It compares local-only, cloud-only, fixed-threshold, measured adaptive, and simulator-oracle policies. The console shows live container decisions separately from seeded simulator races.
+OffloadOps is a live edge-to-cloud image-inspection demo. A browser submits a part image to a FastAPI edge gateway. The gateway chooses local processing or an authenticated cloud worker, and the interface shows the decision and annotated result.
 
-The approved course synopsis is [the project synopsis](docs/Adaptive_Task_Offloading_Synopsis.docx). Implementation and measurement boundaries are recorded in [the audit](docs/AUDIT.md), [decisions](docs/DECISIONS.md), and [verification log](docs/VERIFICATION.md).
+The inspection algorithm flags local-contrast anomalies with an explainable image-processing heuristic. It is a classroom prototype, not a trained or certified factory quality system.
 
-## Architecture
+## How the services fit together
 
-```text
-PowerShell console / demo UI
-            |
-      Edge gateway ---- Prometheus ---- Grafana
-       |       |
- local process  Toxiproxy ---- Cloud worker
-       pool                       |
-                              Process pool
-```
+    Browser UI
+       |
+    Edge gateway and local worker pool
+       |  adaptive routing / cloud fallback
+       +-------------------------------> Cloud worker
+       |
+    Prometheus -> Grafana
 
-The edge gateway accepts an image-based surface-defect inspection, applies a runtime-selectable policy, and either processes the image locally or calls the cloud worker. The worker compares each pixel with its neighborhood, groups strong contrast anomalies into candidate defects, and returns a PASS/REVIEW verdict with an annotated image. This explainable image-processing heuristic makes a convincing offload example because image size affects transfer cost and pixel count affects compute cost. It is a classroom demo, not a trained or certified factory QA system. Toxiproxy lets the demo change latency and throughput without changing application code. Prometheus scrapes both services, and Grafana loads its dashboard and data source from checked-in provisioning files.
+In the local demo, Docker Compose runs the edge gateway, local cloud worker, Toxiproxy, Prometheus, and Grafana. In Azure-backed mode, the edge gateway still runs locally, while the cloud worker URL points to an Azure Container App. Docker Desktop is therefore needed for that mode. The checked-in Azure infrastructure currently provisions the cloud worker; the dashboard and edge gateway are not yet a full Azure-hosted frontend deployment.
 
-The simulator models the same baseline policies and adds stable, periodic, and seeded random-walk network scenarios. It writes the backward-compatible `summary.csv` and `tasks.csv`, plus seed-level `aggregate.csv`, matched-seed `paired.csv`, and `cost_sweep.csv`. The adaptive simulation policy uses EWMA network observations and learned service rates; `adaptive_oracle` uses exact simulator state and exists only as an upper-bound comparison.
+## What the console shows
 
-## Local setup on Windows
+- Live edge and cloud worker-slot utilization over a rolling ten-second window. This is application-level busy-slot time, not host CPU utilization.
+- Completed task throughput over the last minute, split by destination, plus measured cloud round-trip time.
+- The active routing policy, recent decisions, and the decision estimates/reason.
+- A live comparison option that processes the same image independently on edge and cloud and shows both annotated outputs and timings.
+- Local network impairment controls through Toxiproxy. They are disabled when the gateway connects directly to Azure because that traffic does not pass through the local proxy.
 
-Use PowerShell, Python 3.12, Git, and Docker Desktop with the WSL 2 engine. No Linux shell or GNU Make is required. Docker Desktop should have enough memory for the bounded local stack; each Compose service has an explicit memory and CPU limit.
+Adaptive routing predicts completion from workload size, measured network RTT/throughput, worker queues, learned service rates, and a synthetic cloud-cost term. It may correctly choose edge when the task is small or the network makes offloading slower. Choose Cloud only to demonstrate the remote worker explicitly, or use the same-image comparison to run both. The comparison is actual live work, not a simulator replay.
 
-```powershell
-.\tasks.ps1 setup
-.\tasks.ps1 test
-.\tasks.ps1 lint
-```
+## Run locally on Windows
 
-Run a full simulation with the project defaults:
+Requirements: PowerShell, Python 3.12, Git, and Docker Desktop with its Linux engine running.
 
-```powershell
-.\tasks.ps1 sim
-```
+- Install Python dependencies: run **.\tasks.ps1 setup**.
+- Start the whole local demo: run **.\tasks.ps1 demo**.
+- Open the console at **http://localhost:8000/console**.
+- Open Grafana at **http://localhost:3000** and Prometheus at **http://localhost:9090**.
+- Stop the stack: run **.\tasks.ps1 down**.
 
-For a short deterministic smoke run, call Python directly:
+The ports bind to localhost only. Compose sets CPU/memory limits and health checks for the services.
 
-```powershell
-.\.venv\Scripts\python.exe offloading.py --tasks 20 --seeds 1 --bootstrap-resamples 100 --output quick_results
-```
+## Use the Azure worker with the local demo
 
-## Local container demo
+Set the deployed HTTPS worker URL in the Windows user environment as AZURE_WORKER_URL and the matching shared API key as CLOUD_API_KEY. Then run **.\tasks.ps1 demo-azure** from a new or existing PowerShell window. The script reads saved user-level values when they are absent from the current process.
 
-Start the edge gateway, cloud worker, Toxiproxy, Prometheus, and Grafana:
+This mode uses Azure for cloud processing, but keeps the UI and edge gateway on the laptop. For the laptop to be turned off, the dashboard and edge gateway still need Azure hosting.
 
-```powershell
-.\tasks.ps1 demo
-```
+## Project layout
 
-The console opens at [http://localhost:8000/console](http://localhost:8000/console). Grafana is at [http://localhost:3000](http://localhost:3000), and Prometheus is at [http://localhost:9090](http://localhost:9090). Those ports bind to loopback only. The local Grafana password is a demo default; set `GRAFANA_ADMIN_PASSWORD` in the PowerShell session before starting if you want a different local value.
+- offloader/: shared image inspection and the synthetic cost estimate used by routing.
+- services/: edge gateway, cloud worker, and browser console.
+- infra/: active Terraform for Azure Container Apps, registry, monitoring, Key Vault, and budget alerts.
+- monitoring/: Prometheus and Grafana configuration and dashboards.
+- toxiproxy/ and scenarios/: local network emulation.
+- tests/: automated checks for inspection, routing, telemetry, and packaging.
+- scripts/: setup checks, live demo checks, and scenario helpers.
+- docs/: deployment steps, the demo walkthrough, inspection details, and measurement limits.
 
-Use the UI to generate or upload a part image, review the image and inspection settings, then submit it. The result shows the edge/cloud route, PASS/REVIEW, suspected defects, compute and transfer timings, and an annotated image. Change policy or apply a Toxiproxy scenario to see how routing responds. `good`, `poor`, `flapping`, `random-walk`, and `lossy` scenarios are described under `scenarios/`. The `lossy` preset applies a connection timeout toxic; it does not emulate random packet-level loss. See [the inspection walkthrough](docs/SURFACE_INSPECTION.md) for the task semantics and limitations.
+Historical experiments, simulator implementation, and generated result files are preserved outside this repository in the sibling archive folder, so the deliverable tree contains the live application and its deployment/support files.
 
-The gateway API is also available directly:
+## DevOps and observability
 
-```powershell
-Invoke-RestMethod http://localhost:8000/healthz
-Invoke-RestMethod http://localhost:8000/policy
-Invoke-RestMethod -Method Put -Uri http://localhost:8000/policy -ContentType 'application/json' -Body '{"policy":"adaptive"}'
-Invoke-RestMethod -Method Put -Uri http://localhost:8000/scenario -ContentType 'application/json' -Body '{"name":"poor"}'
-```
+GitHub Actions runs Linux/Windows quality checks, container builds, and Terraform formatting/validation. Dockerfiles build separate non-root edge and cloud images. Azure configuration uses Terraform, Container Apps, managed identity, a container registry, Key Vault, Log Analytics, Application Insights, and budget/availability alerts. Alerts notify; they do not stop resource spending.
 
-Submit an image through the console so it can resize and encode the image into the validated inspection request. The request and response fields are documented in [the inspection walkthrough](docs/SURFACE_INSPECTION.md).
+Prometheus exposes application metrics locally. Azure Monitor collects Container Apps logs and optional OpenTelemetry traces. Cloud-cost values shown by the router are synthetic estimates, not Azure billing data. Worker-slot utilization is not Azure host CPU.
 
-Run live HTTP smoke checks, including fallback after stopping the local cloud container:
-
-```powershell
-.\tasks.ps1 demo-check
-```
-
-Replay the committed historical synthetic session when a live demo is unavailable:
-
-```powershell
-.\tasks.ps1 demo-replay
-```
-
-Stop containers and leave named volumes available for the next run:
-
-```powershell
-.\tasks.ps1 down
-```
-
-`demo-offline` uses only local containers. `demo-azure` sends cloud work to a configured Azure Container App while retaining the local edge fallback. See [Azure deployment instructions](docs/AZURE_DEPLOY.md) before setting that up.
-
-## Metrics and experimental claims
-
-The gateway exports Prometheus metrics at `/metrics`: decisions by policy and destination, completion-time histograms, edge queue depth, cloud probe estimates, cloud in-flight work, synthetic cost accumulation, and errors. The bandwidth estimate is application-level probe throughput; the RTT estimate includes service and network overhead. Neither is a direct measurement of available link capacity.
-
-Simulator cost is an explicit synthetic model and does not represent an Azure invoice. Live HTTP body byte counts are not wire-byte or billed-egress counts. Read `docs/AUDIT.md` before interpreting results. The project records cases where adaptive loses; it does not declare a universal winner.
-
-## DevOps workflow
-
-- **Code map:** `offloader/` contains routing policies, simulation, and the shared inspection processor; `services/` contains the HTTP workers and browser console; `infra/` is the active Azure Container Apps deployment; `monitoring/` and `toxiproxy/` contain observability and network simulation; `tests/` contains automated checks; `experiments/` holds optional historical measurement tools and visualization code.
-
-- **Packaging:** `pyproject.toml` defines the core package and direct development/service dependency pins.
-- **Quality gates:** Ruff, pytest, branch coverage, simulator smoke run, and Linux/Windows CI.
-- **Containers:** separate multi-stage edge and cloud images, non-root runtime users, health checks, bounded resources, and pinned direct service dependencies.
-- **Observability:** Prometheus metrics, Grafana provisioning, JSON request logs, correlation IDs, and optional OpenTelemetry export when `APPLICATIONINSIGHTS_CONNECTION_STRING` is configured. The SDK follows the [Azure Monitor OpenTelemetry Python configuration](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-configuration).
-- **Supply chain:** Dependabot checks Python, Docker, Terraform, and GitHub Actions dependencies; a tag or manual workflow can publish SHA-tagged images to GHCR.
-- **Infrastructure as code:** new Azure Container Apps environments are in `infra/`; `azure_function/` and `terraform/` retain the older Azure Functions prototype. The active deployment guide uses `infra/`.
-- **Secrets:** no `.env`, API key, Terraform state, or plan belongs in Git. The Compose key is a local demo default only. Azure reads its worker key from Key Vault through a user-assigned managed identity.
-
-## Azure
-
-Terraform is organized into bootstrap state storage and separate `dev`/`prod` roots. The Container App uses HTTPS ingress, multiple revisions for canary traffic, scale-to-zero by default, bounded replicas, Log Analytics, Application Insights, a Key Vault secret reference, and email budget/service alerts. The region has no Terraform default. Alerts notify; they do not stop spending.
-
-Only local formatting, initialization without a backend, and validation are part of normal CI. No workflow deploys Azure resources. Follow the manual PowerShell commands and university-tenant caveats in [docs/AZURE_DEPLOY.md](docs/AZURE_DEPLOY.md). Useful queries are in [docs/KQL.md](docs/KQL.md).
-
-## Five-minute classroom demo
-
-See [the presenter script](docs/DEMO.md) for click-by-click steps and what to point out at each step.
+See docs/DEMO.md for a presentation walkthrough, docs/AZURE_DEPLOY.md for Azure setup, and docs/SURFACE_INSPECTION.md for request/response details and algorithm limits.

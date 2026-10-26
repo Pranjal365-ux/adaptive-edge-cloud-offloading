@@ -1,14 +1,15 @@
 """HTTP smoke checks for the live local stack, including the cloud circuit breaker."""
+
 from __future__ import annotations
 
-import json
 import base64
 import io
+import json
 import subprocess
 import time
-import uuid
 import urllib.error
 import urllib.request
+import uuid
 
 from PIL import Image, ImageDraw
 
@@ -17,8 +18,12 @@ GATEWAY = "http://127.0.0.1:8000"
 
 def request(path: str, *, method: str = "GET", payload: dict | None = None, timeout: float = 5):
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(f"{GATEWAY}{path}", data=data, method=method,
-        headers={"Content-Type": "application/json"} if data is not None else {})
+    req = urllib.request.Request(
+        f"{GATEWAY}{path}",
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"} if data is not None else {},
+    )
     with urllib.request.urlopen(req, timeout=timeout) as response:
         body = response.read()
         return response.status, json.loads(body) if body.startswith(b"{") else body
@@ -67,8 +72,10 @@ def main() -> int:
         _, cloud = request("/tasks", method="POST", payload=inspection_payload("cloud-smoke"))
         check(cloud["destination"] == "cloud", "policy hot-swap to cloud")
         _, metrics = request("/metrics")
-        check(b"edge_decisions_total" in metrics and b"edge_completion_seconds" in metrics,
-              "Prometheus metrics endpoint")
+        check(
+            b"edge_decisions_total" in metrics and b"edge_completion_seconds" in metrics,
+            "Prometheus metrics endpoint",
+        )
         _, scenario = request("/scenario", method="PUT", payload={"name": "poor"})
         check(scenario["applied"], "Toxiproxy poor-network scenario applied")
         before = request("/status")[1]["rtt_ms"]
@@ -82,18 +89,26 @@ def main() -> int:
         check(changed, "poor scenario measurably changes the cloud probe estimate")
         request("/scenario", method="PUT", payload={"name": "good"})
 
-        stop = subprocess.run(["docker", "compose", "stop", "cloud"], capture_output=True, text=True)
+        stop = subprocess.run(
+            ["docker", "compose", "stop", "cloud"], capture_output=True, text=True
+        )
         check(stop.returncode == 0, "stop cloud container for fallback test")
         try:
             for _ in range(3):
-                _, fallback = request("/tasks", method="POST",
-                    payload=inspection_payload("fallback-smoke"))
-                check(fallback["destination"] == "edge" and fallback["fallback"],
-                      "cloud failure falls back to local edge execution")
-            check(request("/status")[1]["circuit_open"], "cloud circuit breaker opens after failures")
+                _, fallback = request(
+                    "/tasks", method="POST", payload=inspection_payload("fallback-smoke")
+                )
+                check(
+                    fallback["destination"] == "edge" and fallback["fallback"],
+                    "cloud failure falls back to local edge execution",
+                )
+            check(
+                request("/status")[1]["circuit_open"], "cloud circuit breaker opens after failures"
+            )
         finally:
-            subprocess.run(["docker", "compose", "start", "cloud"], check=False,
-                           capture_output=True, text=True)
+            subprocess.run(
+                ["docker", "compose", "start", "cloud"], check=False, capture_output=True, text=True
+            )
             request("/scenario", method="PUT", payload={"name": "good"})
             time.sleep(2)
     finally:

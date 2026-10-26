@@ -23,13 +23,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install project and test dependencies
-        run: python -m pip install -e ".[dev,live,services]"
+        run: python -m pip install -e ".[dev,services]"
       - name: Lint
         run: python -m ruff check .
       - name: Test with coverage
         run: python -m pytest --cov=offloader --cov-report=term-missing
-      - name: Smoke the simulator CLI
-        run: python offloading.py --tasks 20 --seeds 1 --bootstrap-resamples 100 --output ci-results
 
   container-build:
     runs-on: ubuntu-latest

@@ -1,40 +1,24 @@
-# Implementation audit and reproducibility
+# Measurement and implementation boundaries
 
-Baseline inspected: c0bdfade4b7bff4ec364734344988907a2e55b66.
+## Active application
 
-| Component | Purpose | Scope and audit finding |
-|---|---|---|
-| offloading.py | FIFO discrete-event simulator and development-only threshold selection | Synthetic MI, Mbps, one-way delay, CPU service prices; queued transfer sampling and nearest-rank p95 corrected |
-| services/edge_gateway.py, services/cloud_worker.py | Live HTTP routing and workers | Image inspection request validation, adaptive route, local fallback, Prometheus metrics |
-| offloader/inspection.py | Surface scratch inspection processor | Explainable neighborhood contrast heuristic; pixel and image input are bounded; returns candidate boxes and annotated image; not a certified QA model |
-| azure_function/workload.py, azure_function/function_app.py | Retained Azure Functions prototype | Deterministic SHA-256 chain and authenticated HTTP worker from the original experiment; separate from the active image-inspection demo |
-| experiments/live_probe.py | Sequential paired historical pilot | Digests, local wall/compute time, Azure compute, full HTTPS call, JSON-body byte counts; saves after each observation |
-| experiments/live_experiment.py | Historical four-policy live experiment | Separate development calibration, immutable pre-run protocol, identical seeded traces, shuffled policy order, per-task error retention, process-based local executor |
-| terraform/ | Retained legacy Azure Functions infrastructure prototype | Kept for provenance and prior deployment work; active Container Apps deployment is under infra/ |
-| tests/ | Behavioral and regression checks | Simulator, policy, integrity, historical live-experiment, and package checks |
-| experiments/plot_results.py, experiments/dashboard.py | Synthetic result visualization | Dashboard reads simulator; not deployment monitoring |
-| sample_results/ | Historical synthetic examples | Never cite as measured Azure results; regenerate final simulation |
+The edge gateway and cloud worker call the same explainable image-inspection implementation. It decodes a bounded JPEG/PNG/WebP image, compares pixels to a local median surface, groups high-contrast regions, and returns a verdict with an annotated image. This is a classroom heuristic, not a trained or certified quality-inspection model.
 
-## Claims and boundaries
+The adaptive router estimates task completion from image work units, measured application-level cloud RTT and probe throughput, local queue activity, learned worker service rates, and a synthetic cloud-cost term. Estimates are not platform scheduling guarantees. The cloud cost term is a teaching assumption and must not be described as actual Azure billing.
 
-- Completion time: finish minus scheduled arrival includes scheduler lateness and client queueing. Per-task service time begins inside a worker. Throughput is successful tasks divided by last finish relative to run start.
-- p95: nearest-rank ceil(0.95*N), not interpolation. Live latency summaries use successful tasks; errors are separately counted. A policy with failures must not be declared superior from survivor latency.
-- Network: HTTPS round trip includes connection setup, transfer, service queueing, and execution. Round trip minus reported compute is combined overhead, never pure network latency. JSON request/response body lengths are application bytes, not total wire traffic or available bandwidth. Wi-Fi link speed is descriptive only.
-- CPU and memory: psutil samples whole-system CPU percentage, used memory percentage and available RAM. These include unrelated programs; they are descriptive measurements and are not current inputs to the adaptive decision. System CPU percentages are interval measurements with unequal sample intervals; retain raw telemetry rather than calling an unweighted sample mean time-weighted utilization.
-- Adaptive live rule: calibrated per-iteration service and HTTPS overhead plus unfinished client work divided by pool size. It is queue-aware, not a bandwidth-, RAM-, billing-, or server-load-aware optimizer. Full unfinished service overestimates remaining work and assumes divisible capacity. No oracle server queues are observed.
-- Cloud cost: simulator uses an assumed CPU-second price. No actual Azure invoice, per-task billed GB-seconds, storage cost or egress bill is measured. Do not equate simulation price to Azure billing or call student credit zero cost.
-- Resource use: simulator records edge busy-time/capacity/horizon. Live telemetry is not Azure CPU/RAM utilization. Energy, mobility, RAM constraints and failure/retry simulation are absent.
-- Original live code ran a full reference hash inside executor workers after stopping the timer, delaying subsequent jobs. References now run before the experiment; a regression test ensures exactly one local compute per measured execution.
-- Local execution uses a process pool to isolate Python hash-loop work from the scheduler and avoid treating Python threads as independent CPU workers. One local process versus four HTTP request threads is an explicit resource-budget asymmetry, not equal hardware.
-- Calibration and pilot have separate payloads/work sizes from final data. Fixed threshold selection minimizes predicted unqueued latency on development classes; it is not an empirically optimal queued baseline. Include the all-cloud and all-edge candidates.
-- Protocol is saved before final tasks; code hash and settings are checked on replay. Trace generation and ordering are deterministic; timing is not. Matched traces do not imply identical time-varying network conditions.
+## Metrics
 
-## Changes after pilot and freeze
+- Edge and cloud utilization represent rolling busy-worker-slot time over ten seconds, divided by the configured slot capacity. This is application telemetry, not Azure host CPU or memory utilization.
+- Throughput is the gateway's count of successful jobs in a rolling sixty-second window, split by final destination. It is not a long-run benchmark.
+- Cloud RTT includes HTTP/service overhead. The probe transfer rate is application-level response throughput, not available link capacity.
+- Task end-to-end time includes request transfer, network and service overhead, queueing, image processing, and response transfer. Worker compute time is reported separately.
+- A live same-image comparison sends independent requests to both workers concurrently. Their end-to-end times include their respective request paths and are affected by current network conditions.
+- Azure Monitor and Container Apps logs describe the deployed Azure worker. Local Prometheus/Grafana scrape the local Compose services. The local edge can query a remote Azure worker, but that does not turn local edge metrics into Azure-host metrics.
 
-Final protocol and pilot analysis live in the saved evidence directory. Do not tune a threshold against final results. Any rerun after a code/rule change must receive a new protocol and be distinguished from the original evaluation.
+## Failure and fallback
 
-## Commands
+The gateway can fall back to edge processing if the cloud request fails or the circuit breaker is open. A comparison request reports each side independently and does not silently substitute edge output for a failed cloud result. Do not retry timed task submissions automatically because a remote task may have completed even when its response was lost.
 
-Use an isolated Python environment with the versions retained in evidence/software.txt. The maintained project checks are in `tests/` and run with `python -m pytest`; the simulator command is `python offloading.py --tasks 300 --seeds 20 --output results`. Historical live SHA-chain experiment entry points are retained under `experiments/` for provenance and are separate from the current surface-inspection service demo. Azure Functions code and its older Terraform prototype remain under `azure_function/` and `terraform/`; active Azure Container Apps deployment instructions are in `docs/AZURE_DEPLOY.md` and use `infra/`. Keep all Terraform state, saved plans and keys private.
+## Reproducibility and scope
 
-Byte accounting with failures: transferred_input_bytes counts attempted offload payloads, including failed requests, not confirmed delivery. request_body_bytes and response_body_bytes sum successful exchanges; failure rows use zero as an unmeasured placeholder, not proof of no transfer. Report failed-exchange bytes as unknown.
+Historical simulation code, old Azure Functions prototypes, experiment drivers, and generated result files were moved to the sibling archive outside this deliverable repository. They remain available for reference but are not part of the live image-inspection application or its current deployment path.

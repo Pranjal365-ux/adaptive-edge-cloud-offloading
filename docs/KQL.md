@@ -40,4 +40,4 @@ traces
 | order by timestamp desc
 ```
 
-Use `docs/AUDIT.md` for the difference between app-level latency, simulator completion time, and billed Azure cost. Application Insights sampling can affect trace counts; Prometheus histograms remain the demo's main local metric source.
+Use `docs/AUDIT.md` for the distinction between worker-slot utilization, app-level request latency, and actual Azure host metrics. Application Insights sampling can affect trace counts; Prometheus histograms remain the local demo's main metrics source.

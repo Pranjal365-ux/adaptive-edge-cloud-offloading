@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "offloadops"
 version = "0.2.0"
-description = "Reproducible edge-cloud task offloading simulator and operations demo"
+description = "Adaptive edge-cloud image inspection and operations demo"
 requires-python = ">=3.12"
 dependencies = []
 
@@ -15,10 +15,6 @@ dev = [
   "pytest-cov==7.1.0",
   "ruff==0.17.1",
 ]
-live = [
-  "psutil==7.2.2",
-  "azure-functions==1.25.0",
-]
 services = [
   "azure-monitor-opentelemetry==1.8.11",
   "fastapi==0.158.1",
@@ -27,11 +23,6 @@ services = [
   "prometheus-client==0.26.0",
   "pydantic==2.14.1",
   "uvicorn==0.54.0",
-]
-dashboard = [
-  "matplotlib==3.11.2",
-  "pandas==3.0.1",
-  "streamlit==1.55.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -54,7 +45,7 @@ fail_under = 80
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-exclude = [".venv", "terraform/.terraform"]
+exclude = [".venv", "archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

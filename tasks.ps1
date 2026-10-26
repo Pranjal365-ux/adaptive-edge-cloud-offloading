@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('setup', 'test', 'lint', 'sim', 'demo', 'demo-offline', 'demo-azure',
-        'demo-replay', 'demo-check', 'down', 'docker-build', 'tf-validate', 'tf-plan', 'preflight')]
+    [ValidateSet('setup', 'test', 'lint', 'demo', 'demo-offline', 'demo-azure',
+        'demo-check', 'down', 'docker-build', 'tf-validate', 'tf-plan', 'preflight')]
     [string]$Task
 )
 
@@ -31,14 +31,13 @@ try {
                 throw "The existing .venv uses Python $PythonVersion. Preserve it, rename it to .venv-py$($PythonVersion.Replace('.', '')), then run: py -3.12 -m venv .venv"
             }
             Invoke-External $Python @('-m', 'pip', 'install', '--upgrade', 'pip')
-            Invoke-External $Python @('-m', 'pip', 'install', '-e', '.[dev,live,services]')
+            Invoke-External $Python @('-m', 'pip', 'install', '-e', '.[dev,services]')
         }
         'test' { Invoke-External $Python (@('-m', 'pytest', '--cov=offloader', '--cov-report=term-missing') + $TaskArgs) }
         'lint' {
             Invoke-External $Ruff (@('check', '.') + $TaskArgs)
             Invoke-External $Ruff @('format', '--check', '.')
         }
-        'sim' { Invoke-External $Python (@('offloading.py') + $TaskArgs) }
         'demo' {
             Invoke-External 'docker' @('compose', 'up', '-d', '--build', '--wait')
             Start-Process 'http://localhost:8000/console'
@@ -48,13 +47,18 @@ try {
             Start-Process 'http://localhost:8000/console'
         }
         'demo-azure' {
+            if (-not $env:AZURE_WORKER_URL) {
+                $env:AZURE_WORKER_URL = [Environment]::GetEnvironmentVariable('AZURE_WORKER_URL', 'User')
+            }
+            if (-not $env:CLOUD_API_KEY) {
+                $env:CLOUD_API_KEY = [Environment]::GetEnvironmentVariable('CLOUD_API_KEY', 'User')
+            }
             if (-not $env:AZURE_WORKER_URL) { throw 'Set AZURE_WORKER_URL to the deployed HTTPS worker URL.' }
-            if (-not $env:CLOUD_API_KEY) { throw 'Set CLOUD_API_KEY in this PowerShell session for the Azure worker.' }
+            if (-not $env:CLOUD_API_KEY) { throw 'Set CLOUD_API_KEY as a Windows user environment variable for the Azure worker.' }
             $env:CLOUD_URL = $env:AZURE_WORKER_URL
             Invoke-External 'docker' @('compose', 'up', '-d', '--build', '--wait')
             Start-Process 'http://localhost:8000/console'
         }
-        'demo-replay' { Invoke-External $Python @('scripts\replay.py') }
         'demo-check' { Invoke-External $Python @('scripts\demo_check.py') }
         'down' { Invoke-External 'docker' @('compose', 'down') }
         'docker-build' { Invoke-External 'docker' @('compose', 'build') }

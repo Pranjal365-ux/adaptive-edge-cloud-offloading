@@ -1,57 +1,38 @@
-# Azure Container Apps deployment (manual)
+# Azure deployment
 
-This deployment is optional. The local Docker Compose stack is the normal development path. Terraform commands below validate and plan; this guide never runs `apply` or `destroy`. Read `docs/BLOCKERS.md` and `docs/DECISIONS.md` first. Azure budget alerts notify only; they do not cap spending.
+## What this deployment hosts
 
-## 1. Prerequisites
+The active Terraform under infra/ deploys the cloud inspection worker as an Azure Container App, with HTTPS ingress, a managed identity, Key Vault-backed API key, Log Analytics, Application Insights, and budget/service alerts. It does not deploy the browser dashboard or edge gateway. In Azure-backed demo mode, those two components still run locally in Docker and call the remote worker.
 
-Use PowerShell, Azure CLI, Terraform 1.14.x, Docker Desktop, and an Azure subscription where you can create a resource group, storage account, Container Apps environment, Key Vault, Log Analytics, Application Insights, and budget/action group resources. Confirm region and quota support with your tenant.
+## Prerequisites
 
-```powershell
-.\tasks.ps1 preflight
-az login
-az account show
-```
+Use PowerShell, Azure CLI, Terraform 1.14.x or compatible, Docker Desktop, and an Azure subscription with permission to create the resources in infra/. Check available Container Apps quota and budget before applying.
 
-The preflight is read-only. Select the intended subscription explicitly before provisioning: `az account set --subscription <subscription-id>`. Do not paste credentials, subscription secrets, API keys, or Terraform state into chat or Git.
+Run .\tasks.ps1 preflight, then sign in and select the intended subscription with az login and az account set --subscription <subscription-id>. Do not paste credentials, API keys, or Terraform state into chat or Git.
 
-## 2. Build and publish both images
+## Image publishing
 
-Push the reviewed branch, then create a version tag only when you intend to publish. The GitHub workflow publishes edge and cloud images to GHCR with commit SHA and release tags, SBOM, and provenance. Verify both package pages and image pull visibility. If the packages are private, configure Azure registry authentication before continuing; the Terraform example expects pullable image references.
+The GitHub Actions build-push workflow validates source and publishes edge/cloud images to GHCR when manually dispatched or when a version tag is pushed. It does not deploy Azure. Use a public, immutable cloud image reference in the Terraform variables; do not use latest for a stable deployment.
 
-Use full immutable SHA image references for deployment, for example `ghcr.io/<owner>/offloadops-cloud:sha-<commit>`. Do not use `latest` for a release.
+## Configure and review Terraform
 
-## 3. Bootstrap remote state
+Copy infra/envs/dev/backend.hcl.example and infra/envs/dev/terraform.tfvars.example to private local files with the same names without .example. Set the subscription, tenant, region, alert email, public cloud-worker image, and versionless Key Vault secret URI. The referenced Key Vault secret must exist and the current identity must be allowed to assign the worker's Key Vault Secrets User role.
 
-Create a dedicated state resource group and globally unique storage account name. Copy `infra/bootstrap/terraform.tfvars.example` to the ignored local file `infra/bootstrap/terraform.tfvars`, then fill in the resource group, region, and storage account name.
+Initialize, validate, and create a plan from the project root:
 
-```powershell
-Copy-Item infra/bootstrap/terraform.tfvars.example infra/bootstrap/terraform.tfvars
-# Edit infra/bootstrap/terraform.tfvars with your approved values.
-terraform -chdir=infra/bootstrap init
-terraform -chdir=infra/bootstrap validate
-terraform -chdir=infra/bootstrap plan -out=bootstrap.tfplan
-terraform -chdir=infra/bootstrap show bootstrap.tfplan
-```
+    terraform -chdir=infra/envs/dev init -backend-config=backend.hcl
+    terraform -chdir=infra/envs/dev validate
+    terraform -chdir=infra/envs/dev plan -out=dev.tfplan
+    terraform -chdir=infra/envs/dev show dev.tfplan
 
-Only after reviewing the plan and confirming the subscription, region, names, and expected cost should you apply the bootstrap plan yourself. Keep its state storage private and enable the recommended storage protections. Then record the backend resource-group, storage-account, container, and key values locally.
+Review every planned resource, resource name, region, network exposure, and cost before applying. Apply only a reviewed plan when you intend to create/update the Azure resources. Budget alerts notify; they do not cap spending.
 
-## 4. Configure dev or prod
+After apply, get the Terraform cloud_worker_url output. Store that HTTPS URL in the Windows user environment variable AZURE_WORKER_URL and the same worker API key in CLOUD_API_KEY. Then run .\tasks.ps1 demo-azure. The script starts the local UI/edge/observability stack and opens the console. Docker Desktop must stay running in this mode.
 
-For one environment at a time, copy `infra/envs/dev/backend.hcl.example` to ignored `backend.hcl` and `terraform.tfvars.example` to ignored `terraform.tfvars`. Repeat under `infra/envs/prod` only if a separate environment is intended. Fill in a real, immutable cloud image, resource names, location, alert email, and the pre-created Key Vault secret URI. Never commit either local file.
+## CI and deployment status
 
-The cloud worker key must already exist as a Key Vault secret. Supply only its secret URI to Terraform; the Container App reads the secret through its user-assigned managed identity and Key Vault RBAC. Keep the edge API key and cloud API key aligned in the local `demo-azure` session.
+The ci workflow runs tests, lint, container builds, and Terraform validation. The build-push workflow can publish container images. No checked-in workflow automatically applies Terraform or updates the Container App. Deploying a new code revision requires publishing the updated cloud image and updating the Container App image through an approved operator workflow. The currently deployed Azure worker will not gain new telemetry endpoints until its image is updated.
 
-```powershell
-terraform -chdir=infra/envs/dev init -backend-config=backend.hcl
-terraform -chdir=infra/envs/dev validate
-terraform -chdir=infra/envs/dev plan -out=dev.tfplan
-terraform -chdir=infra/envs/dev show dev.tfplan
-```
+## Operations
 
-Review every resource and cost implication. Applying infrastructure is a deliberate operator action outside CI. After apply, configure the local edge gateway with the Container App HTTPS URL and matching API key, then use `.\tasks.ps1 demo-azure`. Do not expose local demo ports beyond loopback.
-
-## 5. Operations and teardown
-
-Check Container App revisions, replica count, readiness, Log Analytics, Application Insights, Key Vault access, and budget notifications in Azure. Use the queries in `docs/KQL.md`. Canary revisions require an explicit traffic split before they receive production traffic.
-
-To remove resources, first inspect Terraform state and a fresh destroy plan. The repository and CI do not run destroy automatically. Keep or delete the state storage only after confirming that every environment and operator no longer needs it.
+Check Container App revisions and readiness, Key Vault access, Log Analytics, Application Insights, and budget/action-group notifications in Azure. Use docs/KQL.md for queries. To remove resources, inspect Terraform state and a fresh destroy plan first; do not remove state storage until all environments are confirmed retired.

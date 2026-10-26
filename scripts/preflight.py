@@ -1,11 +1,18 @@
 """Read-only checks for local tooling and Azure prerequisites; never logs in or prints IDs."""
+
 from __future__ import annotations
 
 import shutil
 import subprocess
 
-PROVIDERS = ("Microsoft.App", "Microsoft.OperationalInsights", "Microsoft.KeyVault",
-             "Microsoft.Consumption", "Microsoft.Insights", "Microsoft.Storage")
+PROVIDERS = (
+    "Microsoft.App",
+    "Microsoft.OperationalInsights",
+    "Microsoft.KeyVault",
+    "Microsoft.Consumption",
+    "Microsoft.Insights",
+    "Microsoft.Storage",
+)
 
 
 def run(args: list[str]) -> tuple[int, str]:
@@ -33,16 +40,36 @@ def main() -> int:
         return 0
     code, _ = run(["az", "account", "show", "--query", "id", "--output", "tsv"])
     if code:
-        print("BLOCKED Azure authentication: run az login, then select a subscription with az account set")
+        print(
+            "BLOCKED Azure authentication: run az login, then select a subscription "
+            "with az account set"
+        )
         return 0
     print("OK Azure authentication: a subscription is selected (ID intentionally not printed)")
     for provider in PROVIDERS:
-        code, state = run(["az", "provider", "show", "--namespace", provider,
-                           "--query", "registrationState", "--output", "tsv"])
+        code, state = run(
+            [
+                "az",
+                "provider",
+                "show",
+                "--namespace",
+                provider,
+                "--query",
+                "registrationState",
+                "--output",
+                "tsv",
+            ]
+        )
         if code:
-            print(f"BLOCKED provider {provider}: check subscription permissions and run az provider register --namespace {provider}")
+            print(
+                f"BLOCKED provider {provider}: check subscription permissions and run "
+                f"az provider register --namespace {provider}"
+            )
         elif state.lower() != "registered":
-            print(f"BLOCKED provider {provider}: state is {state or 'unknown'}; run az provider register --namespace {provider}")
+            print(
+                f"BLOCKED provider {provider}: state is {state or 'unknown'}; run "
+                f"az provider register --namespace {provider}"
+            )
         else:
             print(f"OK provider {provider}: registered")
     print("Terraform init/validate are local checks; this preflight does not create resources.")
