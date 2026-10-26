@@ -19,6 +19,23 @@ function Invoke-External {
     if ($LASTEXITCODE -ne 0) { throw "$Command failed with exit code $LASTEXITCODE" }
 }
 
+function Invoke-ComposeWithCloudUrl {
+    param([Parameter(Mandatory = $true)][string]$CloudUrl)
+    $PreviousCloudUrl = [Environment]::GetEnvironmentVariable('CLOUD_URL', 'Process')
+    try {
+        $env:CLOUD_URL = $CloudUrl
+        Invoke-External 'docker' @('compose', 'up', '-d', '--build', '--wait')
+    }
+    finally {
+        if ($null -eq $PreviousCloudUrl) {
+            [Environment]::SetEnvironmentVariable('CLOUD_URL', $null, 'Process')
+        }
+        else {
+            [Environment]::SetEnvironmentVariable('CLOUD_URL', $PreviousCloudUrl, 'Process')
+        }
+    }
+}
+
 Push-Location $Root
 try {
     switch ($Task) {
@@ -39,11 +56,11 @@ try {
             Invoke-External $Ruff @('format', '--check', '.')
         }
         'demo' {
-            Invoke-External 'docker' @('compose', 'up', '-d', '--build', '--wait')
+            Invoke-ComposeWithCloudUrl -CloudUrl 'http://toxiproxy:8666'
             Start-Process 'http://localhost:8000/console'
         }
         'demo-offline' {
-            Invoke-External 'docker' @('compose', 'up', '-d', '--build', '--wait')
+            Invoke-ComposeWithCloudUrl -CloudUrl 'http://cloud:8081'
             Start-Process 'http://localhost:8000/console'
         }
         'demo-azure' {
@@ -55,8 +72,7 @@ try {
             }
             if (-not $env:AZURE_WORKER_URL) { throw 'Set AZURE_WORKER_URL to the deployed HTTPS worker URL.' }
             if (-not $env:CLOUD_API_KEY) { throw 'Set CLOUD_API_KEY as a Windows user environment variable for the Azure worker.' }
-            $env:CLOUD_URL = $env:AZURE_WORKER_URL
-            Invoke-External 'docker' @('compose', 'up', '-d', '--build', '--wait')
+            Invoke-ComposeWithCloudUrl -CloudUrl $env:AZURE_WORKER_URL
             Start-Process 'http://localhost:8000/console'
         }
         'demo-check' { Invoke-External $Python @('scripts\demo_check.py') }
