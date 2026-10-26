@@ -43,7 +43,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: edge-meta
         with:
           images: ghcr.io/${{ steps.image.outputs.owner }}/offloadops-edge
@@ -59,7 +59,7 @@ jobs:
           labels: ${{ steps.edge-meta.outputs.labels }}
           provenance: true
           sbom: true
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: cloud-meta
         with:
           images: ghcr.io/${{ steps.image.outputs.owner }}/offloadops-cloud
