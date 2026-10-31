@@ -30,7 +30,7 @@ services = [
 ]
 dashboard = [
   "matplotlib==3.11.2",
-  "pandas==3.0.1",
+  "pandas==3.1.0",
   "streamlit==1.55.0",
 ]
 
