@@ -1,9 +1,9 @@
-FROM python:3.12-slim AS wheels
+FROM python:3.15-slim AS wheels
 WORKDIR /build
 COPY requirements-services.txt .
 RUN python -m pip wheel --no-cache-dir --wheel-dir /wheels -r requirements-services.txt
 
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 WORKDIR /app
